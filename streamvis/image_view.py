@@ -1,7 +1,24 @@
 import bottleneck as bn
 import numpy as np
-from bokeh.models import CheckboxGroup, ColumnDataSource, CustomJS, HoverTool, Label, Range1d
-from bokeh.plotting import figure
+from bokeh.models import (
+    BasicTicker,
+    ColumnDataSource,
+    CustomJS,
+    Grid,
+    HoverTool,
+    Image,
+    Line,
+    LinearAxis,
+    PanTool,
+    Plot,
+    Quad,
+    Range1d,
+    ResetTool,
+    SaveTool,
+    Text,
+    Toggle,
+    WheelZoomTool,
+)
 from PIL import Image as PIL_Image
 
 js_move_zoom = """
@@ -15,8 +32,8 @@ js_move_zoom = """
 class ImageView:
     def __init__(
         self,
-        height=894,
-        width=854,
+        plot_height=894,
+        plot_width=854,
         image_height=100,
         image_width=100,
         x_start=None,
@@ -27,8 +44,8 @@ class ImageView:
         """Initialize image view plot.
 
         Args:
-            height (int, optional): Height of plot area in screen pixels. Defaults to 894.
-            width (int, optional): Width of plot area in screen pixels. Defaults to 854.
+            plot_height (int, optional): Height of plot area in screen pixels. Defaults to 894.
+            plot_width (int, optional): Width of plot area in screen pixels. Defaults to 854.
             image_height (int, optional): Image height in pixels. Defaults to 100.
             image_width (int, optional): Image width in pixels. Defaults to 100.
             x_start (int, optional): Initial x-axis start value. If None, then equals to 0.
@@ -54,24 +71,34 @@ class ImageView:
 
         self.zoom_views = []
 
-        plot = figure(
-            x_axis_location="above",
-            y_axis_location="right",
+        plot = Plot(
             x_range=Range1d(x_start, x_end, bounds=(0, image_width)),
             y_range=Range1d(y_start, y_end, bounds=(0, image_height)),
-            height=height,
-            width=width,
+            plot_height=plot_height,
+            plot_width=plot_width,
             toolbar_location="left",
-            tools="pan,wheel_zoom,save,reset",
         )
         self.plot = plot
 
+        # ---- tools
         plot.toolbar.logo = None
-        plot.toolbar.tools[1].maintain_focus = False
 
-        plot.yaxis.major_label_orientation = "vertical"
+        hovertool = HoverTool(tooltips=[("intensity", "@image")], names=["image_glyph"])
 
-        # ---- image glyph
+        plot.add_tools(
+            PanTool(), WheelZoomTool(maintain_focus=False), SaveTool(), ResetTool(), hovertool
+        )
+        plot.toolbar.active_scroll = plot.tools[1]
+
+        # ---- axes
+        plot.add_layout(LinearAxis(), place="above")
+        plot.add_layout(LinearAxis(major_label_orientation="vertical"), place="right")
+
+        # ---- grid lines
+        plot.add_layout(Grid(dimension=0, ticker=BasicTicker()))
+        plot.add_layout(Grid(dimension=1, ticker=BasicTicker()))
+
+        # ---- rgba image glyph
         self._image_source = ColumnDataSource(
             dict(
                 image=[np.zeros((1, 1), dtype="float32")],
@@ -82,77 +109,68 @@ class ImageView:
             )
         )
 
-        image_renderer = plot.image(
-            source=self._image_source,
-            image="image",
-            x="x",
-            y="y",
-            dw="dw",
-            dh="dh",
-            name="image_glyph",
-        )
-        self.image_glyph = image_renderer.glyph
+        self.image_glyph = Image(image="image", x="x", y="y", dw="dw", dh="dh")
+        image_renderer = plot.add_glyph(self._image_source, self.image_glyph, name="image_glyph")
 
         # This avoids double update of image values on a client, see
         # https://github.com/bokeh/bokeh/issues/7079
         # https://github.com/bokeh/bokeh/issues/7299
         image_renderer.view.source = ColumnDataSource()
 
-        plot.add_tools(HoverTool(tooltips=[("intensity", "@image")], renderers=[image_renderer]))
-
         # ---- pixel value text glyph
         self._pvalue_source = ColumnDataSource(dict(x=[], y=[], text=[]))
-        plot.text(
-            source=self._pvalue_source,
-            x="x",
-            y="y",
-            text="text",
-            text_align="center",
-            text_baseline="middle",
-            text_color="white",
+        plot.add_glyph(
+            self._pvalue_source,
+            Text(
+                x="x",
+                y="y",
+                text="text",
+                text_align="center",
+                text_baseline="middle",
+                text_color="white",
+            ),
         )
 
         # ---- horizontal and vertical projection line glyphs
         self._hproj_source = ColumnDataSource(dict(x=[], y=[]))
-        plot.line(source=self._hproj_source, x="x", y="y", line_color="greenyellow")
+        plot.add_glyph(self._hproj_source, Line(x="x", y="y", line_color="red"))
 
         self._vproj_source = ColumnDataSource(dict(x=[], y=[]))
-        plot.line(source=self._vproj_source, x="x", y="y", line_color="greenyellow")
+        plot.add_glyph(self._vproj_source, Line(x="x", y="y", line_color="red"))
 
-        proj_switch = CheckboxGroup(labels=["Inner Projections"], width=145, margin=(0, 5, 0, 5))
-        self.proj_switch = proj_switch
-
-        # ---- image view coordinates label
-        self._coord_label = Label(
-            x=10, y=10, text="", text_color="white", x_units="screen", y_units="screen"
-        )
-        plot.add_layout(self._coord_label)
+        proj_toggle = Toggle(label="Inner Projections", button_type="default", default_size=145)
+        self.proj_toggle = proj_toggle
 
     @property
     def displayed_image(self):
-        """Return resized image that is currently displayed (readonly)."""
+        """Return resized image that is currently displayed (readonly).
+        """
         return self._image_source.data["image"][0]
 
     # a reason for the additional boundary checks:
     # https://github.com/bokeh/bokeh/issues/8118
     @property
     def x_start(self):
-        """Current x-axis image start value (readonly)."""
+        """Current x-axis image start value (readonly).
+        """
         return int(np.floor(max(self.plot.x_range.start, self.plot.x_range.bounds[0])))
 
     @property
     def x_end(self):
-        """Current x-axis image end value (readonly)."""
+        """Current x-axis image end value (readonly).
+        """
         return int(np.ceil(min(self.plot.x_range.end, self.plot.x_range.bounds[1])))
 
     @property
     def y_start(self):
-        """Current y-axis image start value (readonly)."""
+        """Current y-axis image start value (readonly).
+        """
         return int(np.floor(max(self.plot.y_range.start, self.plot.y_range.bounds[0])))
 
     @property
     def y_end(self):
-        """Current y-axis image end value (readonly)."""
+        """Current y-axis image end value (readonly).
+        """
         return int(np.ceil(min(self.plot.y_range.end, self.plot.y_range.bounds[1])))
 
     def add_as_zoom(self, image_view, line_color="red"):
@@ -162,9 +180,6 @@ class ImageView:
             image_plot (ImageView): Associated streamvis image view instance.
             line_color (str, optional): Zoom border box color. Defaults to 'red'.
         """
-        # ---- activate WheelZoomTool
-        image_view.plot.toolbar.active_scroll = image_view.plot.tools[1]
-
         # ---- add quad glyph of zoom area to the main plot
         area_source = ColumnDataSource(
             dict(
@@ -175,8 +190,7 @@ class ImageView:
             )
         )
 
-        self.plot.quad(
-            source=area_source,
+        area_rect = Quad(
             left="left",
             right="right",
             bottom="bottom",
@@ -185,6 +199,7 @@ class ImageView:
             line_width=2,
             fill_alpha=0,
         )
+        self.plot.add_glyph(area_source, area_rect)
 
         x_range_cb = CustomJS(
             args=dict(source=area_source), code=js_move_zoom.format(start="left", end="right")
@@ -267,7 +282,7 @@ class ImageView:
             self._pvalue_source.data.update(x=[], y=[], text=[])
 
         # Draw projections
-        if self.proj_switch.active:
+        if self.proj_toggle.active:
             im_y_len, im_x_len = resized_image.shape
 
             h_x = np.linspace(self.x_start + 0.5, self.x_end - 0.5, im_x_len)
@@ -284,11 +299,6 @@ class ImageView:
         else:
             self._hproj_source.data.update(x=[], y=[])
             self._vproj_source.data.update(x=[], y=[])
-
-        # Update image view coordinates label text
-        self._coord_label.text = (
-            f"Y:({self.y_start}, {self.y_end}) X:({self.x_start}, {self.x_end})"
-        )
 
         # Process all accociated zoom views
         for zoom_view in self.zoom_views:

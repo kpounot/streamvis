@@ -1,26 +1,23 @@
-from ipaddress import ip_address, ip_network
-
 from bokeh.application.handlers import Handler
 from bokeh.models import Div
 
 
 class StreamvisHandler(Handler):
-    """Provides a mechanism for generic bokeh applications to build up new streamvis documents."""
+    """Provides a mechanism for generic bokeh applications to build up new streamvis documents.
+    """
 
-    def __init__(self, receiver, stats, jf_adapter, args):
+    def __init__(self, receiver, stats, args):
         """Initialize a streamvis handler for bokeh applications.
 
         Args:
             receiver (Receiver): A streamvis receiver instance to be shared between all documents.
             stats (StreamHandler): A streamvis statistics handler.
-            jf_adapter (StreamAdapter): A jungfrau stream adapter.
             args (Namespace): Command line parsed arguments.
         """
         super().__init__()  # no-op
 
         self.receiver = receiver
         self.stats = stats
-        self.jf_adapter = jf_adapter
         self.title = args.page_title
         self.client_fps = args.client_fps
 
@@ -35,41 +32,30 @@ class StreamvisHandler(Handler):
         """
         doc.receiver = self.receiver
         doc.stats = self.stats
-        doc.jf_adapter = self.jf_adapter
         doc.title = self.title
         doc.client_fps = self.client_fps
 
+        return doc
 
-class StreamvisCheckHandler(Handler):
-    """Checks whether the document should be cleared based on a set of conditions."""
 
-    div_access_denied = """
+class StreamvisLimitSessionsHandler(Handler):
+    """Provides a mechanism to limit a number of concurrent connections to streamvis apps.
+    """
+
+    div_text = """
         <h2>
-        Can not connect to Streamvis server.
+        The maximum number of concurrent client connections to StreamVis server has been reached.
         </h2>
     """
 
-    div_max_sessions = """
-        <h2>
-        The maximum number of concurrent client connections to Streamvis server has been reached.
-        </h2>
-    """
-
-    def __init__(self, max_sessions=None, allow_client_subnet=None):
+    def __init__(self, max_n_sessions):
         super().__init__()  # no-op
 
-        self.max_sessions = max_sessions
-        self.num_sessions = 0
-        if allow_client_subnet is None:
-            self.allow_client_subnet = None
-        else:
-            self.allow_client_subnet = [ip_network(subnet) for subnet in allow_client_subnet]
+        self.max_n_sessions = max_n_sessions
+        self.n_sessions = 0
 
     def modify_document(self, doc):
-        """Clear document if conditions are not met.
-
-        Verify client connection subnet.
-        Limit a number of concurrent client connections to an application.
+        """Limit a number of concurrent client connections to an application.
 
         Args:
             doc (Document) : A bokeh Document to update in-place
@@ -77,32 +63,17 @@ class StreamvisCheckHandler(Handler):
         Returns:
             Document
         """
-        if self.allow_client_subnet is not None:
-            remote_ip = ip_address(doc.session_context.request._request.remote_ip)
-            for subnet in self.allow_client_subnet:
-                if remote_ip in subnet:
-                    break
-            else:
-                # connection from a disallowed subnet
-                self._clear_doc(doc)
-                doc.add_root(Div(text=self.div_access_denied, width=1000))
-                return
+        if self.n_sessions >= self.max_n_sessions:
+            # there are already maximum number of active connections
+            doc.clear()
+            del doc.receiver
+            del doc.stats
+            doc.add_root(Div(text=self.div_text, width=1000))
+        else:
+            self.n_sessions += 1
 
-        if self.max_sessions is not None:
-            if self.num_sessions >= self.max_sessions:
-                # there is already a maximum number of active connections
-                self._clear_doc(doc)
-                doc.add_root(Div(text=self.div_max_sessions, width=1000))
-                return
-
-        self.num_sessions += 1
-
-    def _clear_doc(self, doc):
-        doc.clear()
-        del doc.receiver
-        del doc.jf_adapter
-        del doc.stats
+        return doc
 
     async def on_session_destroyed(self, session_context):
         if hasattr(session_context._document, "receiver"):
-            self.num_sessions -= 1
+            self.n_sessions -= 1

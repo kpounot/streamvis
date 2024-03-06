@@ -1,6 +1,7 @@
 from datetime import datetime
+from itertools import compress, repeat
 
-from bokeh.models import CheckboxGroup, ColumnDataSource, DataTable, StringFormatter, TableColumn
+from bokeh.models import ColumnDataSource, DataTable, StringFormatter, TableColumn, Toggle
 
 # metadata entries that are always shown (if present)
 default_entries = ["frame", "pulse_id", "is_good_frame", "saturated_pixels", "time_poll"]
@@ -56,9 +57,9 @@ class MetadataHandler:
         self._issues_datatable_source = issues_datatable_source
         self.issues_datatable = issues_datatable
 
-        # Show all switch
-        show_all_switch = CheckboxGroup(labels=["Show All Metadata"], width=145)
-        self.show_all_switch = show_all_switch
+        # Show all toggle
+        show_all_toggle = Toggle(label="Show All Metadata", button_type="default", default_size=145)
+        self.show_all_toggle = show_all_toggle
 
     def add_issue(self, issue):
         """Add an issue to be displayed in metadata issues dropdown.
@@ -68,7 +69,7 @@ class MetadataHandler:
         """
         self._issues_menu.append(issue)
 
-    def _parse(self, metadata):
+    def parse(self, metadata):
         """Parse metadata for general issues.
 
         Args:
@@ -78,7 +79,7 @@ class MetadataHandler:
             dict: Metadata entries to be displayed in a datatable.
         """
         # Prepare a dictionary with metadata entries to show
-        if self.show_all_switch.active:
+        if self.show_all_toggle.active:
             metadata_toshow = metadata
         else:
             metadata_toshow = {
@@ -86,6 +87,46 @@ class MetadataHandler:
             }
 
         # Check metadata for issues
+        # full array slice in case of 'module_enabled' is not present
+        module_enabled = metadata.get("module_enabled", repeat(True))
+
+        pulse_id_diff = metadata.get("pulse_id_diff")
+        if pulse_id_diff:
+            if isinstance(module_enabled, list) and len(module_enabled) != len(pulse_id_diff):
+                self.add_issue("Shapes of 'pulse_id_diff' and 'module_enabled' are not the same")
+                metadata_toshow["module_enabled"] = module_enabled
+                metadata_toshow["pulse_id_diff"] = pulse_id_diff
+            else:
+                if any(compress(pulse_id_diff, module_enabled)):
+                    self.add_issue("Not all pulse_id_diff are 0")
+                    metadata_toshow["pulse_id_diff"] = pulse_id_diff
+
+        missing_packets_1 = metadata.get("missing_packets_1")
+        if missing_packets_1:
+            if isinstance(module_enabled, list) and len(module_enabled) != len(missing_packets_1):
+                self.add_issue(
+                    "Shapes of 'missing_packets_1' and 'module_enabled' are not the same"
+                )
+                metadata_toshow["module_enabled"] = module_enabled
+                metadata_toshow["missing_packets_1"] = missing_packets_1
+            else:
+                if any(compress(missing_packets_1, module_enabled)):
+                    self.add_issue("Not all missing_packets_1 are 0")
+                    metadata_toshow["missing_packets_1"] = missing_packets_1
+
+        missing_packets_2 = metadata.get("missing_packets_2")
+        if missing_packets_2:
+            if isinstance(module_enabled, list) and len(module_enabled) != len(missing_packets_2):
+                self.add_issue(
+                    "Shapes of 'missing_packets_2' and 'module_enabled' are not the same"
+                )
+                metadata_toshow["module_enabled"] = module_enabled
+                metadata_toshow["missing_packets_2"] = missing_packets_2
+            else:
+                if any(compress(missing_packets_2, module_enabled)):
+                    self.add_issue("Not all missing_packets_2 are 0")
+                    metadata_toshow["missing_packets_2"] = missing_packets_2
+
         is_good_frame = metadata.get("is_good_frame", True)
         if not is_good_frame:
             self.add_issue("Frame is not good")
@@ -111,14 +152,12 @@ class MetadataHandler:
 
         return metadata_toshow
 
-    def update(self, metadata):
+    def update(self, metadata_toshow):
         """Trigger an update for the metadata handler.
 
         Args:
-            metadata (dict): Metadata to be parsed and displayed in datatables.
+            metadata_toshow (dict): Metadata entries to be displayed in a datatable.
         """
-        metadata_toshow = self._parse(metadata)
-
         # Unpack metadata
         self._datatable_source.data.update(
             metadata=list(map(str, metadata_toshow.keys())),

@@ -2,20 +2,36 @@ from collections import deque
 from datetime import datetime
 from itertools import islice
 
-from bokeh.models import BasicTickFormatter, Button, ColumnDataSource, DataRange1d, Legend, Spinner
-from bokeh.plotting import figure
+from bokeh.models import (
+    BasicTicker,
+    BasicTickFormatter,
+    BoxZoomTool,
+    Button,
+    ColumnDataSource,
+    DataRange1d,
+    DatetimeAxis,
+    Grid,
+    Legend,
+    Line,
+    LinearAxis,
+    PanTool,
+    Plot,
+    ResetTool,
+    Spinner,
+    WheelZoomTool,
+)
 
 MAXLEN = 100
 
 
 class StreamGraph:
-    def __init__(self, nplots, height=200, width=1000, rollover=10800, mode="time"):
+    def __init__(self, nplots, plot_height=200, plot_width=1000, rollover=10800, mode="time"):
         """Initialize stream graph plots.
 
         Args:
             nplots (int): Number of stream plots that will share common controls.
-            height (int, optional): Height of plot area in screen pixels. Defaults to 200.
-            width (int, optional): Width of plot area in screen pixels. Defaults to 1000.
+            plot_height (int, optional): Height of plot area in screen pixels. Defaults to 200.
+            plot_width (int, optional): Width of plot area in screen pixels. Defaults to 1000.
             rollover (int, optional): A maximum number of points, above which data from the start
                 begins to be discarded. If None, then graph will grow unbounded. Defaults to 10800.
             mode (str, optional): stream update mode, 'time' - uses the local wall time,
@@ -27,39 +43,48 @@ class StreamGraph:
         self._buffers = []
         self._window = 30
 
+        # Custom tick formatter for displaying large numbers
+        tick_formatter = BasicTickFormatter(precision=1)
+
         # Stream graphs
         self.plots = []
+        self.glyphs = []
         self._sources = []
         for ind in range(nplots):
             # share x_range between plots
             if ind == 0:
-                shared_x_range = DataRange1d()
+                x_range = DataRange1d()
 
-            if mode == "time":
-                x_axis_type = "datetime"
-            elif mode == "number":
-                x_axis_type = "linear"
-            else:
-                raise ValueError("Parameter `mode` should be either `time` or `number`")
-
-            plot = figure(
-                x_axis_type=x_axis_type,
-                x_range=shared_x_range,
+            plot = Plot(
+                x_range=x_range,
                 y_range=DataRange1d(),
-                height=height,
-                width=width,
-                tools="pan,box_zoom,wheel_zoom,reset",
+                plot_height=plot_height,
+                plot_width=plot_width,
             )
 
+            # ---- tools
             plot.toolbar.logo = None
-            plot.toolbar.tools[2].dimensions = "width"
+            plot.add_tools(PanTool(), BoxZoomTool(), WheelZoomTool(dimensions="width"), ResetTool())
 
-            # Custom tick formatter for displaying large numbers
-            plot.yaxis.formatter = BasicTickFormatter(precision=1)
+            # ---- axes
+            plot.add_layout(LinearAxis(formatter=tick_formatter), place="left")
+            if mode == "time":
+                plot.add_layout(DatetimeAxis(), place="below")
+            elif mode == "number":
+                plot.add_layout(LinearAxis(), place="below")
+            else:
+                pass
 
+            # ---- grid lines
+            plot.add_layout(Grid(dimension=0, ticker=BasicTicker()))
+            plot.add_layout(Grid(dimension=1, ticker=BasicTicker()))
+
+            # ---- line glyph
             source = ColumnDataSource(dict(x=[], y=[], x_avg=[], y_avg=[]))
-            line_renderer = plot.line(source=source, x="x", y="y", line_color="gray")
-            line_avg_renderer = plot.line(source=source, x="x_avg", y="y_avg", line_color="red")
+            line = Line(x="x", y="y", line_color="gray")
+            line_avg = Line(x="x_avg", y="y_avg", line_color="red")
+            line_renderer = plot.add_glyph(source, line)
+            line_avg_renderer = plot.add_glyph(source, line_avg)
 
             # ---- legend
             plot.add_layout(
@@ -71,6 +96,7 @@ class StreamGraph:
             plot.legend.click_policy = "hide"
 
             self.plots.append(plot)
+            self.glyphs.append(line)
             self._sources.append(source)
             self._buffers.append(deque(maxlen=MAXLEN))
 
@@ -80,7 +106,7 @@ class StreamGraph:
                 self._window = new_value
 
         moving_average_spinner = Spinner(
-            title="Moving Average Window:", value=self._window, low=1, high=MAXLEN, width=145
+            title="Moving Average Window:", value=self._window, low=1, high=MAXLEN, default_size=145
         )
         moving_average_spinner.on_change("value", moving_average_spinner_callback)
         self.moving_average_spinner = moving_average_spinner
@@ -102,7 +128,7 @@ class StreamGraph:
                         y_avg=[source.data["y_avg"][-1]],
                     )
 
-        reset_button = Button(label="Reset", button_type="default", width=145)
+        reset_button = Button(label="Reset", button_type="default", default_size=145)
         reset_button.on_click(reset_button_callback)
         self.reset_button = reset_button
 

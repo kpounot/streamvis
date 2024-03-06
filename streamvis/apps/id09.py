@@ -5,12 +5,14 @@ from bokeh.layouts import column, gridplot, row
 from bokeh.models import Div, Spacer, Title
 
 import streamvis as sv
+from input_control import StreamControl
+
 
 doc = curdoc()
 
 # Expected image sizes for the detector
-IMAGE_SIZE_X = 1030
-IMAGE_SIZE_Y = 1554
+IMAGE_SIZE_X = 1064
+IMAGE_SIZE_Y = 1032
 
 # Resolution rings positions in angstroms
 RESOLUTION_RINGS_POS = np.array([2, 2.2, 2.6, 3, 5, 10])
@@ -21,21 +23,21 @@ sv_rt = sv.Runtime()
 MAIN_CANVAS_WIDTH = IMAGE_SIZE_X // 2 + 55 + 40
 MAIN_CANVAS_HEIGHT = IMAGE_SIZE_Y // 2 + 86 + 60
 
-ZOOM_CANVAS_WIDTH = 388 + 55
-ZOOM_CANVAS_HEIGHT = 388 + 62
+ZOOM_CANVAS_WIDTH = 250 + 55
+ZOOM_CANVAS_HEIGHT = 250 + 62
 
 DEBUG_INTENSITY_WIDTH = 700
 
-ZOOM_WIDTH = 500
-ZOOM_HEIGHT = 500
+ZOOM_WIDTH = 250
+ZOOM_HEIGHT = 250
 
-ZOOM1_LEFT = 265
-ZOOM1_BOTTOM = 800
+ZOOM1_LEFT = int(IMAGE_SIZE_X / 2 - ZOOM_WIDTH / 2)
+ZOOM1_BOTTOM = int(IMAGE_SIZE_Y / 2 - ZOOM_HEIGHT / 2)
 ZOOM1_RIGHT = ZOOM1_LEFT + ZOOM_WIDTH
 ZOOM1_TOP = ZOOM1_BOTTOM + ZOOM_HEIGHT
 
-ZOOM2_LEFT = 265
-ZOOM2_BOTTOM = 200
+ZOOM2_LEFT = 750
+ZOOM2_BOTTOM = 750
 ZOOM2_RIGHT = ZOOM2_LEFT + ZOOM_WIDTH
 ZOOM2_TOP = ZOOM2_BOTTOM + ZOOM_HEIGHT
 
@@ -79,7 +81,7 @@ sv_streamgraph = sv.StreamGraph(nplots=2, plot_height=160, plot_width=DEBUG_INTE
 sv_streamgraph.plots[0].title = Title(text="Total intensity")
 sv_streamgraph.plots[1].title = Title(text="Normalized signal−background Intensity")
 
-sv_colormapper = sv.ColorMapper([sv_main, sv_zoom1, sv_zoom2])
+sv_colormapper = sv.ColorMapper([sv_main, sv_zoom1, sv_zoom2], disp_min=0, disp_max=100)
 sv_colormapper.color_bar.width = MAIN_CANVAS_WIDTH // 2
 sv_colormapper.color_bar.height = 10
 sv_main.plot.add_layout(sv_colormapper.color_bar, place="below")
@@ -92,12 +94,12 @@ sv_saturated_pixels = sv.SaturatedPixels([sv_main, sv_zoom1, sv_zoom2])
 
 sv_spots = sv.Spots([sv_main])
 
-sv_hist = sv.Histogram(nplots=3, plot_height=300, plot_width=600)
+sv_hist = sv.Histogram(nplots=3, plot_height=250, plot_width=500, lower=0, upper=100)
 sv_hist.plots[0].title = Title(text="Full image")
 sv_hist.plots[1].title = Title(text="Signal roi", text_color="red")
 sv_hist.plots[2].title = Title(text="Background roi", text_color="green")
 
-sv_streamctrl = sv.StreamControl()
+sv_streamctrl = StreamControl()
 
 sv_metadata = sv.MetadataHandler(datatable_height=130, datatable_width=700)
 sv_metadata.issues_datatable.height = 100
@@ -156,9 +158,10 @@ layout_metadata = column(
 final_layout = column(
     row(
         layout_main,
-        Spacer(width=15),
+        Spacer(width=30),
         column(
-            layout_metadata, Spacer(height=10), layout_utility, Spacer(height=10), layout_controls
+            # layout_metadata, Spacer(height=10), layout_utility, Spacer(height=10), layout_controls
+            layout_utility, Spacer(height=10), layout_controls
         ),
     ),
     layout_hist,

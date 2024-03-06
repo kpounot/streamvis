@@ -1,7 +1,7 @@
 import bottleneck as bn
 from bokeh.io import curdoc
 from bokeh.layouts import column, gridplot, row
-from bokeh.models import Div, Spacer, Title
+from bokeh.models import Spacer, Title, Div
 
 import streamvis as sv
 
@@ -18,45 +18,46 @@ ZOOM_CANVAS_HEIGHT = 514 + 28
 
 
 # Create streamvis components
-sv_streamctrl = sv.StreamControl(sv_rt)
-sv_metadata = sv.MetadataHandler(datatable_width=500)
-sv_metadata.issues_datatable.height = 100
-
 sv_main = sv.ImageView(
-    height=MAIN_CANVAS_HEIGHT, width=MAIN_CANVAS_WIDTH, image_height=514, image_width=1030
+    plot_height=MAIN_CANVAS_HEIGHT,
+    plot_width=MAIN_CANVAS_WIDTH,
+    image_height=514,
+    image_width=1030,
 )
 
 sv_zoom = sv.ImageView(
-    height=ZOOM_CANVAS_HEIGHT,
-    width=ZOOM_CANVAS_WIDTH,
+    plot_height=ZOOM_CANVAS_HEIGHT,
+    plot_width=ZOOM_CANVAS_WIDTH,
     image_height=514,
     image_width=1030,
     x_start=258,
     x_end=772,
 )
 
-sv_zoom.proj_switch = sv_main.proj_switch
+sv_zoom.proj_toggle = sv_main.proj_toggle
 sv_main.add_as_zoom(sv_zoom)
 
 sv_colormapper = sv.ColorMapper([sv_main, sv_zoom])
 sv_colormapper.color_bar.width = MAIN_CANVAS_WIDTH // 2
 sv_main.plot.add_layout(sv_colormapper.color_bar, place="below")
 
-sv_resolrings = sv.ResolutionRings([sv_main, sv_zoom], sv_metadata, sv_streamctrl)
-sv_intensity_roi = sv.IntensityROI([sv_main, sv_zoom], sv_metadata, sv_streamctrl)
-sv_saturated_pixels = sv.SaturatedPixels([sv_main, sv_zoom], sv_metadata, sv_streamctrl)
-sv_spots = sv.Spots([sv_main], sv_metadata, sv_streamctrl)
-sv_disabled_modules = sv.DisabledModules([sv_main], sv_streamctrl)
+sv_saturated_pixels = sv.SaturatedPixels([sv_main, sv_zoom])
 
-sv_hist = sv.Histogram(nplots=2, height=200, width=700)
+sv_hist = sv.Histogram(nplots=2, plot_height=200, plot_width=700)
 sv_hist.plots[0].title = Title(text="Full image")
 sv_hist.plots[1].title = Title(text="Roi")
+sv_hist.auto_toggle.width = 200
 
-sv_streamgraph = sv.StreamGraph(nplots=2, height=200, width=700)
+sv_streamgraph = sv.StreamGraph(nplots=2, plot_height=200, plot_width=700)
 sv_streamgraph.plots[0].title = Title(text="Total intensity")
 sv_streamgraph.plots[1].title = Title(text="Zoom total intensity")
 
-sv_imageproc = sv.ImageProcessor()
+sv_streamctrl = sv.StreamControl()
+
+sv_image_processor = sv.ImageProcessor()
+
+sv_metadata = sv.MetadataHandler(datatable_width=500)
+sv_metadata.issues_datatable.height = 100
 
 
 # Final layouts
@@ -73,32 +74,33 @@ layout_utility = column(
 show_overlays_div = Div(text="Show Overlays:")
 
 layout_controls = column(
-    row(sv_imageproc.threshold_min_spinner, sv_imageproc.threshold_max_spinner),
-    sv_imageproc.threshold_switch,
-    row(sv_imageproc.aggregate_limit_spinner, sv_imageproc.aggregate_counter_textinput),
-    row(sv_imageproc.aggregate_switch, sv_imageproc.average_switch),
+    row(sv_image_processor.threshold_min_spinner, sv_image_processor.threshold_max_spinner),
+    sv_image_processor.threshold_toggle,
+    row(
+        sv_image_processor.aggregate_time_spinner,
+        sv_image_processor.aggregate_time_counter_textinput,
+    ),
+    sv_image_processor.aggregate_toggle,
+    doc.stats.auxiliary_apps_dropdown,
     row(sv_colormapper.select, sv_colormapper.high_color, sv_colormapper.mask_color),
+    sv_colormapper.scale_radiobuttongroup,
     row(sv_colormapper.display_min_spinner, sv_colormapper.display_max_spinner),
-    row(sv_colormapper.auto_switch, sv_colormapper.scale_radiogroup),
+    sv_colormapper.auto_toggle,
     show_overlays_div,
-    row(sv_resolrings.switch, sv_main.proj_switch),
-    row(sv_intensity_roi.switch, sv_saturated_pixels.switch),
-    Spacer(height=5),
-    row(sv_streamctrl.datatype_select, sv_streamctrl.rotate_image),
-    sv_streamctrl.prev_image_slider,
-    row(sv_streamctrl.conv_opts, sv_streamctrl.double_pixels),
-    row(Spacer(width=155), sv_streamctrl.show_only_events_switch),
-    row(doc.stats.auxiliary_apps_dropdown, sv_streamctrl.toggle),
+    row(sv_saturated_pixels.toggle, sv_main.proj_toggle),
+    sv_streamctrl.datatype_select,
+    sv_streamctrl.conv_opts_cbbg,
+    sv_streamctrl.toggle,
 )
 
 layout_metadata = column(
-    sv_metadata.issues_datatable, row(sv_metadata.show_all_switch), sv_metadata.datatable
+    sv_metadata.issues_datatable, sv_metadata.datatable, row(sv_metadata.show_all_toggle)
 )
 
 layout_hist = column(
     gridplot(sv_hist.plots, ncols=1, toolbar_location="left", toolbar_options=dict(logo=None)),
     row(
-        column(sv_hist.auto_switch, sv_hist.log10counts_switch),
+        column(Spacer(height=19), sv_hist.auto_toggle),
         sv_hist.lower_spinner,
         sv_hist.upper_spinner,
         sv_hist.nbins_spinner,
@@ -116,8 +118,8 @@ doc.add_root(final_layout)
 async def internal_periodic_callback():
     if sv_streamctrl.is_activated and sv_streamctrl.is_receiving:
         sv_rt.metadata, sv_rt.image = sv_streamctrl.get_stream_data(-1)
-        sv_rt.thresholded_image, sv_rt.aggregated_image, sv_rt.reset = sv_imageproc.update(
-            sv_rt.metadata, sv_rt.image
+        sv_rt.thresholded_image, sv_rt.aggregated_image, sv_rt.reset = sv_image_processor.update(
+            sv_rt.image
         )
 
     if sv_rt.image.shape == (1, 1):
@@ -130,19 +132,13 @@ async def internal_periodic_callback():
     sv_colormapper.update(aggr_image)
     sv_main.update(aggr_image)
 
-    sv_spots.update(metadata)
-    sv_resolrings.update(metadata)
-    sv_intensity_roi.update(metadata)
-    sv_saturated_pixels.update(metadata)
-    sv_disabled_modules.update(metadata)
-
     # Statistics
     im_block = aggr_image[sv_zoom.y_start : sv_zoom.y_end, sv_zoom.x_start : sv_zoom.x_end]
     total_sum_zoom = bn.nansum(im_block)
 
     # Deactivate auto histogram range if aggregation is on
-    if sv_imageproc.aggregate_switch.active:
-        sv_hist.auto_switch.active = []
+    if sv_image_processor.aggregate_toggle.active:
+        sv_hist.auto_toggle.active = False
 
     # Update histogram
     if sv_streamctrl.is_activated and sv_streamctrl.is_receiving:
@@ -155,7 +151,12 @@ async def internal_periodic_callback():
     # Update total intensities plots
     sv_streamgraph.update([bn.nansum(aggr_image), total_sum_zoom])
 
-    sv_metadata.update(metadata)
+    # Parse and update metadata
+    metadata_toshow = sv_metadata.parse(metadata)
+
+    sv_saturated_pixels.update(metadata)
+
+    sv_metadata.update(metadata_toshow)
 
 
 doc.add_periodic_callback(internal_periodic_callback, 1000 / doc.client_fps)

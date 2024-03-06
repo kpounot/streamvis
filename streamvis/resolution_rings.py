@@ -1,13 +1,5 @@
 import numpy as np
-from bokeh.models import (
-    CheckboxGroup,
-    ColumnDataSource,
-    CustomJSHover,
-    Ellipse,
-    HoverTool,
-    Scatter,
-    Text,
-)
+from bokeh.models import ColumnDataSource, Cross, CustomJSHover, Ellipse, HoverTool, Text, Toggle
 
 js_resolution = """
     var detector_distance = params.data.detector_distance
@@ -24,23 +16,16 @@ js_resolution = """
     return resolution.toFixed(2)
 """
 
-POSITIONS = (1, 1.2, 1.4, 1.5, 1.6, 1.8, 2, 2.2, 2.6, 3, 5, 10)
-
 
 class ResolutionRings:
-    def __init__(self, image_views, sv_metadata, sv_streamctrl, positions=POSITIONS):
+    def __init__(self, image_views, positions):
         """Initialize a resolution rings overlay.
 
         Args:
             image_views (ImageView): Associated streamvis image view instances.
-            sv_metadata (MetadataHandler): A metadata handler to report metadata issues.
-            sv_streamctrl (StreamControl): A StreamControl instance of an application.
-            positions (list, optional): Scattering radii in Angstroms. Defaults to
-                [1.4, 1.5, 1.6, 1.8, 2, 2.2, 2.6, 3, 5, 10].
+            positions (ndarray): Scattering radii in Angstroms.
         """
-        self._sv_metadata = sv_metadata
-        self._sv_streamctrl = sv_streamctrl
-        self.positions = np.array(positions)
+        self.positions = positions
 
         # ---- add resolution tooltip to hover tool
         self._formatter_source = ColumnDataSource(
@@ -56,10 +41,16 @@ class ResolutionRings:
             args=dict(params=self._formatter_source), code=js_resolution
         )
 
+        hovertool = HoverTool(
+            tooltips=[("intensity", "@image"), ("resolution", "@x{resolution} Å")],
+            formatters={"@x": resolution_formatter},
+            names=["image_glyph"],
+        )
+
         # ---- resolution rings
         self._source = ColumnDataSource(dict(x=[], y=[], w=[], h=[], text_x=[], text_y=[], text=[]))
         ellipse_glyph = Ellipse(
-            x="x", y="y", width="w", height="h", fill_alpha=0, line_color="white"
+            x="x", y="y", width="w", height="h", fill_alpha=0, line_color="white", line_alpha=0
         )
 
         text_glyph = Text(
@@ -69,93 +60,70 @@ class ResolutionRings:
             text_align="center",
             text_baseline="middle",
             text_color="white",
+            text_alpha=0,
         )
 
-        cross_glyph = Scatter(
-            x="beam_center_x", y="beam_center_y", marker="cross", size=15, line_color="red"
+        cross_glyph = Cross(
+            x="beam_center_x", y="beam_center_y", size=15, line_color="red", line_alpha=0
         )
 
         for image_view in image_views:
             image_view.plot.add_glyph(self._source, ellipse_glyph)
             image_view.plot.add_glyph(self._source, text_glyph)
             image_view.plot.add_glyph(self._formatter_source, cross_glyph)
+            image_view.plot.tools[-1] = hovertool
 
-        # ---- switch
-        def switch_callback(_attr, _old, new):
-            for image_view in image_views:
-                image_renderer = image_view.plot.select(name="image_glyph")
-                if 0 in new:
-                    hovertool = HoverTool(
-                        tooltips=[("intensity", "@image"), ("resolution", "@x{resolution} Å")],
-                        formatters={"@x": resolution_formatter},
-                        renderers=image_renderer,
-                    )
-                else:
-                    hovertool = HoverTool(
-                        tooltips=[("intensity", "@image")], renderers=image_renderer
-                    )
+        # ---- toggle button
+        def toggle_callback(state):
+            if state:
+                ellipse_glyph.line_alpha = 1
+                text_glyph.text_alpha = 1
+                cross_glyph.line_alpha = 1
+            else:
+                ellipse_glyph.line_alpha = 0
+                text_glyph.text_alpha = 0
+                cross_glyph.line_alpha = 0
 
-                image_view.plot.tools[-1] = hovertool
+        toggle = Toggle(label="Resolution Rings", button_type="default", default_size=145)
+        toggle.on_click(toggle_callback)
+        self.toggle = toggle
 
-        switch = CheckboxGroup(labels=["Resolution Rings"], width=145, margin=(0, 5, 0, 5))
-        switch.on_change("active", switch_callback)
-        self.switch = switch
-
-    def _clear(self):
-        if len(self._source.data["x"]):
-            self._source.data.update(x=[], y=[], w=[], h=[], text_x=[], text_y=[], text=[])
-
-    def update(self, metadata):
+    def update(self, metadata, sv_metadata):
         """Trigger an update for the resolution rings overlay.
 
         Args:
             metadata (dict): A dictionary with current metadata.
+            sv_metadata (MetadataHandler): Report update issues to that metadata handler.
         """
         detector_distance = metadata.get("detector_distance", np.nan)
         beam_energy = metadata.get("beam_energy", np.nan)
         beam_center_x = metadata.get("beam_center_x", np.nan)
         beam_center_y = metadata.get("beam_center_y", np.nan)
 
-        n_rot90 = self._sv_streamctrl.n_rot90
-        im_shape = self._sv_streamctrl.current_image_shape  # image shape after rotation in sv
-        if n_rot90 == 1 or n_rot90 == 3:
-            # get the original shape for consistency in calculations
-            im_shape = im_shape[1], im_shape[0]
+        if not any(np.isnan([detector_distance, beam_energy, beam_center_x, beam_center_y])):
+            array_beam_center_x = beam_center_x * np.ones(len(self.positions))
+            array_beam_center_y = beam_center_y * np.ones(len(self.positions))
+            # if '6200 / beam_energy > 1', then arcsin returns nan
+            theta = np.arcsin(6200 / beam_energy / self.positions)  # 6200 = 1.24 / 2 / 1e-4
+            ring_diams = 2 * detector_distance * np.tan(2 * theta) / 75e-6
+            # if '2 * theta > pi / 2 <==> diams < 0', then return nan
+            ring_diams[ring_diams < 0] = np.nan
 
-        if n_rot90 == 1:  # (x, y) -> (y, -x)
-            beam_center_x, beam_center_y = beam_center_y, im_shape[1] - beam_center_x
-        elif n_rot90 == 2:  # (x, y) -> (-x, -y)
-            beam_center_x, beam_center_y = im_shape[1] - beam_center_x, im_shape[0] - beam_center_y
-        elif n_rot90 == 3:  # (x, y) -> (-y, x)
-            beam_center_x, beam_center_y = im_shape[0] - beam_center_y, beam_center_x
+            text_x = array_beam_center_x + ring_diams / 2
+            text_y = array_beam_center_y
+            ring_text = [str(s) + " Å" for s in self.positions]
 
-        self._formatter_source.data.update(
-            detector_distance=[detector_distance],
-            beam_energy=[beam_energy],
-            beam_center_x=[beam_center_x],
-            beam_center_y=[beam_center_y],
-        )
+        else:
+            array_beam_center_x = []
+            array_beam_center_y = []
+            ring_diams = []
 
-        if not self.switch.active:
-            self._clear()
-            return
+            text_x = []
+            text_y = []
+            ring_text = []
 
-        if any(np.isnan([detector_distance, beam_energy, beam_center_x, beam_center_y])):
-            self._sv_metadata.add_issue("Metadata does not contain all data for resolution rings")
-            self._clear()
-            return
-
-        array_beam_center_x = beam_center_x * np.ones(len(self.positions))
-        array_beam_center_y = beam_center_y * np.ones(len(self.positions))
-        # if '6200 / beam_energy > 1', then arcsin returns nan
-        theta = np.arcsin(6200 / beam_energy / self.positions)  # 6200 = 1.24 / 2 / 1e-4
-        ring_diams = 2 * detector_distance * np.tan(2 * theta) / 75e-6
-        # if '2 * theta > pi / 2 <==> diams < 0', then return nan
-        ring_diams[ring_diams < 0] = np.nan
-
-        text_x = array_beam_center_x + ring_diams / 2
-        text_y = array_beam_center_y
-        ring_text = [str(s) + " Å" for s in self.positions]
+            if self.toggle.active:
+                sv_metadata.add_issue("Metadata does not contain all data for resolution rings")
 
         self._source.data.update(
             x=array_beam_center_x,
@@ -165,4 +133,11 @@ class ResolutionRings:
             text_x=text_x,
             text_y=text_y,
             text=ring_text,
+        )
+
+        self._formatter_source.data.update(
+            detector_distance=[detector_distance],
+            beam_energy=[beam_energy],
+            beam_center_x=[beam_center_x],
+            beam_center_y=[beam_center_y],
         )

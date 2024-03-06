@@ -2,7 +2,8 @@ import numpy as np
 
 
 class Runtime:
-    """A utility class that provides a view on the current data for each document."""
+    """A utility class that provides a view on the current data for each document.
+    """
 
     def __init__(self):
         self.metadata = dict(shape=[1, 1])

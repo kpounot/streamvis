@@ -11,7 +11,7 @@ from bokeh.server.server import Server
 
 from streamvis import __version__
 from streamvis.handler import StreamvisHandler, StreamvisLimitSessionsHandler
-from streamvis.receiver import Receiver
+from receiver import Receiver
 from streamvis.statistics_handler import StatisticsHandler
 
 logging.basicConfig(format="%(asctime)s %(message)s", level=logging.INFO)
@@ -49,8 +49,8 @@ def main():
         "--allow-websocket-origin",
         metavar="HOST[:PORT]",
         type=str,
-        action="append",
-        default=None,
+        action='append',
+        default=["lid09maxwell:5006", "172.29.10.104:5006", "localhost:5006"],
         help="a hostname that can connect to the server websocket",
     )
 
@@ -62,7 +62,8 @@ def main():
         "--address",
         metavar="PROTOCOL://HOST:PORT",
         type=str,
-        default="tcp://127.0.0.1:9001",
+        action='append',
+        default=["tcp://172.29.10.100:30001", "tcp://172.29.10.100:30002"],
         help="an address string for zmq socket",
     )
 
@@ -108,6 +109,11 @@ def main():
         default=1,
         help="client update rate in frames per second",
     )
+    
+    burst_parser = parser.add_mutually_exclusive_group(required=False)
+    burst_parser.add_argument('--burst', dest='burst', action='store_true')
+    burst_parser.add_argument('--no-burst', dest='burst', action='store_false')
+    parser.set_defaults(burst=False)
 
     parser.add_argument(
         "--args",
@@ -127,10 +133,13 @@ def main():
 
     # Receiver gets messages via zmq stream, reconstruct images (only those that are being
     # requested), and parses statistics with StatisticsHandler
-    receiver = Receiver(on_receive=stats.parse, buffer_size=args.buffer_size)
+    receiver = Receiver(buffer_size=args.buffer_size)
+    # receiver = Receiver(on_receive=stats.parse, buffer_size=args.buffer_size)
 
-    # Start receiver in a separate thread
-    start_receiver = partial(receiver.start, args.io_threads, args.connection_mode, args.address)
+    # Start receivers in a separate threads
+    start_receiver = partial(
+        receiver.start, args.io_threads, args.connection_mode, args.address, args.burst,
+    )
     t = Thread(target=start_receiver, daemon=True)
     t.start()
 

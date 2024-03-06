@@ -1,29 +1,21 @@
 import sys
 
-from time import sleep
-
 import logging
 from collections import deque
 from datetime import datetime
 
-from pathlib import Path
-
-import json
+from threading import Thread
 
 import numpy as np
 import zmq
 from jungfrau_utils import JFDataHandler
 from numba import njit
 
-from datastorage import DataStorage
-
-from id09.detectors.jungfrau import correct, process_jf_darks
-
 logger = logging.getLogger(__name__)
 
 
 class Receiver:
-    def __init__(self, on_receive=None, buffer_size=1, publisher_address=None):
+    def __init__(self, on_receive=None, buffer_size=1):
         """Initialize a jungfrau receiver.
 
         Args:
@@ -33,117 +25,77 @@ class Receiver:
                 Defaults to 1.
         """
         self.buffer = deque(maxlen=buffer_size)
-        self.raw = deque(maxlen=buffer_size)
         self.state = "polling"
         self.on_receive = on_receive
-        self.publisher = publisher_address
 
         self.jf_adapter = StreamAdapter()
 
-    def start(self, io_threads, connection_mode, address, burst=False, timeout=1000):
+    def start(self, io_threads, connection_mode, address):
         """Start the receiver loop.
 
         Args:
             io_threads (int): The size of the zmq thread pool to handle I/O operations.
             connection_mode (str): Use either 'connect' or 'bind' zmq_socket methods.
-            address (list of str): The addresses strings, e.g. '[tcp://127.0.0.1:9001]'.
+            address (str): The address string, e.g. 'tcp://127.0.0.1:9001'.
 
         Raises:
             RuntimeError: Unknown connection mode.
         """
         zmq_context = zmq.Context(io_threads=io_threads)
+        zmq_socket = zmq_context.socket(zmq.SUB)  # pylint: disable=E1101
+        zmq_socket.setsockopt_string(zmq.SUBSCRIBE, "")  # pylint: disable=E1101
 
-        base_folder = Path("/data/visitor/ls3363/id09/20240227/")
-        if burst:
-            print("Using burst")
-            gains = DataStorage(str(base_folder / "SCRIPTS/gain_maps_m524_m525_sc.h5")).gains
-            darks = DataStorage(str(base_folder / "PROCESSED_DATA/darks/darks_last_sc.h5")).darks
+        if connection_mode == "connect":
+            zmq_socket.connect(address)
+        elif connection_mode == "bind":
+            zmq_socket.bind(address)
         else:
-            gains = DataStorage(str(base_folder / "SCRIPTS/gain_maps_m524_m525.h5")).gains
-            darks = DataStorage(str(base_folder / "PROCESSED_DATA/darks/darks_last.h5")).darks
+            raise RuntimeError("Unknown connection mode {connection_mode}")
 
-        sockets = []
         poller = zmq.Poller()
-        for adrs in address:
-            zmq_socket = zmq_context.socket(zmq.SUB)
-            if connection_mode == "connect":
-                zmq_socket.connect(adrs)
-            elif connection_mode == "bind":
-                zmq_socket.bind(adrs)
-            else:
-                raise RuntimeError("Unknown connection mode {connection_mode}")
-
-            zmq_socket.setsockopt_string(zmq.SUBSCRIBE, "")
-            poller.register(zmq_socket, zmq.POLLIN)
-            sockets.append(zmq_socket)
+        poller.register(zmq_socket, zmq.POLLIN)
 
         while True:
-            events = dict(poller.poll(timeout))
+            events = dict(poller.poll(1000))
+            if zmq_socket not in events:
+                self.state = "polling"
+                continue
+
             time_poll = datetime.now()
-            is_receiving = True
-            while is_receiving:
-                metas, imgs = [], []
-                for socket in sockets:
-                    if socket not in events:
-                        self.state = "polling"
-                        is_receiving = False
+            metadata = zmq_socket.recv_json(flags=0)
+            image = zmq_socket.recv(flags=0, copy=False, track=False)
+            metadata["time_poll"] = time_poll
+            metadata["time_recv"] = datetime.now() - time_poll
 
-                    ans = socket.recv_multipart()
-                    if len(ans) == 2:  # check if it is (metadata, data) for one module
-                        metadata, image = ans
-                        self.raw.append((metadata, image))
-                        metadata = json.loads(metadata.decode('utf-8'))
-                        metadata["time_poll"] = time_poll
-                        metadata["time_recv"] = datetime.now() - time_poll
-                        dtype = metadata.get("type" )
-                        shape = metadata.get("shape")
-                        if dtype is None and shape is None:
-                            logger.error("Cannot find 'type' and 'shape' in received metadata")
-                            continue
+            dtype = metadata.get("type")
+            shape = metadata.get("shape")
+            if dtype is None and shape is None:
+                logger.error("Cannot find 'type' and 'shape' in received metadata")
+                continue
 
-                        if dtype is None:
-                            dtype = np.uint16
+            if dtype is None:
+                dtype = np.uint16
 
-                        if len(image) % 16 == 0:
-                            image = np.frombuffer(image, dtype=dtype).reshape(shape[::-1])
-                        else:
-                            print("WARNING: image data size is not 16 bits per pixel")
-                            continue
+            print(len(image.buffer))
+            print(shape)
+            image = np.frombuffer(image.buffer, dtype=dtype).reshape(shape)
 
-                        if image.shape != (2, 2):
-                            metas.append(metadata)
-                            imgs.append(image)
+            # add to buffer only if the recieved image is not dummy
+            if image.shape != (2, 2):
+                self.buffer.append((metadata, image))
 
-                    else:
-                        is_receiving = False
+            self.state = "receiving"
 
-                    if len(metas) == 2:
-                        frameIdx = metas[-1]['frameIndex'] % 16 if burst else 0
-                        metadata = metas[-1]
-                        if metas[-1]['frameIndex'] == metas[-2]['frameIndex']:
-                            image = np.array(imgs[-2:])
-                            try: 
-                                image = correct(image, darks=darks[frameIdx], gains=gains[frameIdx], geometry=True)
-                                image = image[:, ::-1].T
-                                self.buffer.append((metadata, image))
-                            except:
-                                print("Check if dark is in the right BURST/STANDARD mode")
-                            self.state = "receiving"
+            if self.on_receive is not None:
+                self.on_receive(metadata, image)
 
-                            if self.on_receive is not None:
-                                self.on_receive(metadata, image)
-        
-    def get_image(self, index, mask=True, gap_pixels=True, geometry=True, processed=False):
+    def get_image(self, index, mask=True, gap_pixels=True, geometry=True):
         """Get metadata and image with the index.
         """
         metadata, raw_image = self.buffer[index]
-
-        if not processed:
-            image = self.jf_adapter.process(
-                raw_image, metadata, mask=mask, gap_pixels=gap_pixels, geometry=geometry
-            )
-        else:
-            image = raw_image
+        image = self.jf_adapter.process(
+            raw_image, metadata, mask=mask, gap_pixels=gap_pixels, geometry=geometry
+        )
 
         if (
             self.jf_adapter.handler
@@ -322,6 +274,29 @@ def _apply_mask_core(image, mask):
 
 
 if __name__ == "__main__":
-    rcv = Receiver()
+    args = sys.argv[1:]
 
-    rcv.start(1, 'connect', ['tcp://172.29.10.100:30001', 'tcp://172.29.10.100:30002'])
+    def sender(socket, meta, image):
+        print("receiving!")
+        new_meta = {
+            'dtype': str(image.dtype),
+            'shape': image.shape
+        }
+        meta.update(new_meta)
+        meta['time_poll'] = meta['time_poll'].isoformat()
+        meta['time_recv'] = meta['time_recv'].total_seconds()
+        socket.send_json(meta, zmq.SNDMORE)
+        socket.send(image, copy=True)
+
+    rc = Receiver(on_receive=lambda meta, img: sender(socket, meta, img))
+	
+    zmq_context = zmq.Context()
+    socket = zmq_context.socket(zmq.PUB) 
+    socket.bind(args[-1])
+
+    threads = []
+    connection_type = ['connect', 'connect']
+    for idx, address in enumerate(args[:-1]):
+        t = Thread(None, target=rc.start, args=(1, connection_type[idx], address))
+        threads.append(t)
+        t.start()

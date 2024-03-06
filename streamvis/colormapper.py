@@ -2,16 +2,17 @@ import colorcet as cc
 import numpy as np
 from bokeh.models import (
     BasicTicker,
-    CheckboxGroup,
     ColorBar,
     ColorPicker,
     LinearColorMapper,
     LogColorMapper,
     LogTicker,
-    RadioGroup,
+    RadioButtonGroup,
     Select,
     Spinner,
+    Toggle,
 )
+
 from bokeh.palettes import Cividis256, Greys256, Plasma256
 
 cmap_dict = {
@@ -23,7 +24,7 @@ cmap_dict = {
 }
 
 # TODO: Can be changed back to 0.1 when https://github.com/bokeh/bokeh/issues/9408 is fixed
-STEP = 0.1
+STEP = 1
 
 
 class ColorMapper:
@@ -63,27 +64,27 @@ class ColorMapper:
                 high_color.color = cmap_dict[new][-1]
 
         select = Select(
-            title="Colormap:", value=colormap, options=list(cmap_dict.keys()), width=100
+            title="Colormap:", value=colormap, options=list(cmap_dict.keys()), default_size=100
         )
         select.on_change("value", select_callback)
         self.select = select
 
-        # ---- auto switch
-        def auto_switch_callback(_attr, _old, new):
-            if 0 in new:
+        # ---- auto toggle button
+        def auto_toggle_callback(state):
+            if state:
                 display_min_spinner.disabled = True
                 display_max_spinner.disabled = True
             else:
                 display_min_spinner.disabled = False
                 display_max_spinner.disabled = False
 
-        auto_switch = CheckboxGroup(labels=["Auto Colormap Range"], width=145)
-        auto_switch.on_change("active", auto_switch_callback)
-        self.auto_switch = auto_switch
+        auto_toggle = Toggle(label="Auto Colormap Range", active=False, button_type="default")
+        auto_toggle.on_click(auto_toggle_callback)
+        self.auto_toggle = auto_toggle
 
-        # ---- scale radiogroup
-        def scale_radiogroup_callback(_attr, _old, new):
-            if new == 0:  # Linear
+        # ---- scale radiobutton group
+        def scale_radiobuttongroup_callback(selection):
+            if selection == 0:  # Linear
                 for image_view in image_views:
                     image_view.image_glyph.color_mapper = lin_colormapper
                 color_bar.color_mapper = lin_colormapper
@@ -96,17 +97,17 @@ class ColorMapper:
                     color_bar.color_mapper = log_colormapper
                     color_bar.ticker = LogTicker()
                 else:
-                    scale_radiogroup.active = 0
+                    scale_radiobuttongroup.active = 0
 
-        scale_radiogroup = RadioGroup(labels=["Linear", "Logarithmic"], active=0, width=145)
-        scale_radiogroup.on_change("active", scale_radiogroup_callback)
-        self.scale_radiogroup = scale_radiogroup
+        scale_radiobuttongroup = RadioButtonGroup(labels=["Linear", "Logarithmic"], active=0)
+        scale_radiobuttongroup.on_click(scale_radiobuttongroup_callback)
+        self.scale_radiobuttongroup = scale_radiobuttongroup
 
         # ---- display max value
         def display_max_spinner_callback(_attr, _old_value, new_value):
             self.display_min_spinner.high = new_value - STEP
             if new_value <= 0:
-                scale_radiogroup.active = 0
+                scale_radiobuttongroup.active = 0
 
             lin_colormapper.high = new_value
             log_colormapper.high = new_value
@@ -116,8 +117,8 @@ class ColorMapper:
             low=disp_min + STEP,
             value=disp_max,
             step=STEP,
-            disabled=bool(auto_switch.active),
-            width=145,
+            disabled=auto_toggle.active,
+            default_size=145,
         )
         display_max_spinner.on_change("value", display_max_spinner_callback)
         self.display_max_spinner = display_max_spinner
@@ -126,7 +127,7 @@ class ColorMapper:
         def display_min_spinner_callback(_attr, _old_value, new_value):
             self.display_max_spinner.low = new_value + STEP
             if new_value <= 0:
-                scale_radiogroup.active = 0
+                scale_radiobuttongroup.active = 0
 
             lin_colormapper.low = new_value
             log_colormapper.low = new_value
@@ -136,8 +137,8 @@ class ColorMapper:
             high=disp_max - STEP,
             value=disp_min,
             step=STEP,
-            disabled=bool(auto_switch.active),
-            width=145,
+            disabled=auto_toggle.active,
+            default_size=145,
         )
         display_min_spinner.on_change("value", display_min_spinner_callback)
         self.display_min_spinner = display_min_spinner
@@ -147,7 +148,9 @@ class ColorMapper:
             lin_colormapper.high_color = new_value
             log_colormapper.high_color = new_value
 
-        high_color = ColorPicker(title="High Color:", color=cmap_dict[colormap][-1], width=90)
+        high_color = ColorPicker(
+            title="High Color:", color=cmap_dict[colormap][-1], default_size=90
+        )
         high_color.on_change("color", high_color_callback)
         self.high_color = high_color
 
@@ -156,18 +159,20 @@ class ColorMapper:
             lin_colormapper.nan_color = new_value
             log_colormapper.nan_color = new_value
 
-        mask_color = ColorPicker(title="Mask Color:", color="gray", width=90)
+        mask_color = ColorPicker(title="Mask Color:", color="gray", default_size=90)
         mask_color.on_change("color", mask_color_callback)
         self.mask_color = mask_color
 
     @property
     def disp_min(self):
-        """Minimal display value (readonly)"""
+        """Minimal display value (readonly)
+        """
         return self.display_min_spinner.value
 
     @property
     def disp_max(self):
-        """Maximal display value (readonly)"""
+        """Maximal display value (readonly)
+        """
         return self.display_max_spinner.value
 
     def update(self, image):
@@ -176,12 +181,12 @@ class ColorMapper:
         Args:
             image (ndarray): A source image for colormapper.
         """
-        if self.auto_switch.active:
+        if self.auto_toggle.active:
             image_min = int(np.nanmin(image))
             image_max = int(np.nanmax(image))
 
             if image_min <= 0:  # switch to linear colormap
-                self.scale_radiogroup.active = 0
+                self.scale_radiobuttongroup.active = 0
 
             # force update independently on current display values
             self.display_min_spinner.high = None

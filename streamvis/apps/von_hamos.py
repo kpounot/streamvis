@@ -1,6 +1,7 @@
 from datetime import datetime
 
 import bottleneck as bn
+import numpy as np
 from bokeh.io import curdoc
 from bokeh.layouts import column, gridplot, row
 from bokeh.models import Button, ColumnDataSource, Div, Line, Select, Spacer, Title
@@ -38,22 +39,20 @@ ZOOM2_BOTTOM = 0
 ZOOM2_RIGHT = ZOOM2_LEFT + ZOOM_WIDTH
 ZOOM2_TOP = ZOOM2_BOTTOM + ZOOM_HEIGHT
 
+# Resolution rings positions in angstroms
+RESOLUTION_RINGS_POS = np.array([2, 2.2, 2.6, 3, 5, 10])
 
 # Create streamvis components
-sv_streamctrl = sv.StreamControl(sv_rt)
-sv_metadata = sv.MetadataHandler(datatable_height=430, datatable_width=800)
-sv_metadata.issues_datatable.height = 100
-
 sv_main = sv.ImageView(
-    height=MAIN_CANVAS_HEIGHT,
-    width=MAIN_CANVAS_WIDTH,
+    plot_height=MAIN_CANVAS_HEIGHT,
+    plot_width=MAIN_CANVAS_WIDTH,
     image_height=IMAGE_SIZE_Y,
     image_width=IMAGE_SIZE_X,
 )
 
 sv_zoom1 = sv.ImageView(
-    height=ZOOM_CANVAS_HEIGHT,
-    width=ZOOM_CANVAS_WIDTH,
+    plot_height=ZOOM_CANVAS_HEIGHT,
+    plot_width=ZOOM_CANVAS_WIDTH,
     image_height=IMAGE_SIZE_Y,
     image_width=IMAGE_SIZE_X,
     x_start=ZOOM1_LEFT,
@@ -61,18 +60,18 @@ sv_zoom1 = sv.ImageView(
     y_start=ZOOM1_BOTTOM,
     y_end=ZOOM1_TOP,
 )
-sv_zoom1.proj_switch = sv_main.proj_switch
+
 sv_main.add_as_zoom(sv_zoom1, line_color="red")
 
-sv_zoom1_proj_v = sv.Projection(sv_zoom1, "vertical", height=ZOOM_AGG_X_PLOT_HEIGHT)
+sv_zoom1_proj_v = sv.Projection(sv_zoom1, "vertical", plot_height=ZOOM_AGG_X_PLOT_HEIGHT)
 sv_zoom1_proj_v.plot.title = Title(text="Zoom Area 1")
 sv_zoom1_proj_v.plot.renderers[0].glyph.line_width = 2
 
-sv_zoom1_proj_h = sv.Projection(sv_zoom1, "horizontal", width=ZOOM_AGG_Y_PLOT_WIDTH)
+sv_zoom1_proj_h = sv.Projection(sv_zoom1, "horizontal", plot_width=ZOOM_AGG_Y_PLOT_WIDTH)
 
 sv_zoom2 = sv.ImageView(
-    height=ZOOM_CANVAS_HEIGHT,
-    width=ZOOM_CANVAS_WIDTH,
+    plot_height=ZOOM_CANVAS_HEIGHT,
+    plot_width=ZOOM_CANVAS_WIDTH,
     image_height=IMAGE_SIZE_Y,
     image_width=IMAGE_SIZE_X,
     x_start=ZOOM2_LEFT,
@@ -80,28 +79,30 @@ sv_zoom2 = sv.ImageView(
     y_start=ZOOM2_BOTTOM,
     y_end=ZOOM2_TOP,
 )
-sv_zoom2.proj_switch = sv_main.proj_switch
+
 sv_main.add_as_zoom(sv_zoom2, line_color="green")
 
-sv_zoom2_proj_v = sv.Projection(sv_zoom2, "vertical", height=ZOOM_AGG_X_PLOT_HEIGHT)
+sv_zoom2_proj_v = sv.Projection(sv_zoom2, "vertical", plot_height=ZOOM_AGG_X_PLOT_HEIGHT)
 sv_zoom2_proj_v.plot.title = Title(text="Zoom Area 2")
 sv_zoom2_proj_v.plot.renderers[0].glyph.line_width = 2
 
-sv_zoom2_proj_h = sv.Projection(sv_zoom2, "horizontal", width=ZOOM_AGG_Y_PLOT_WIDTH)
+sv_zoom2_proj_h = sv.Projection(sv_zoom2, "horizontal", plot_width=ZOOM_AGG_Y_PLOT_WIDTH)
 
 sv_colormapper = sv.ColorMapper([sv_main, sv_zoom1, sv_zoom2])
 sv_colormapper.color_bar.width = MAIN_CANVAS_WIDTH // 2
 sv_main.plot.add_layout(sv_colormapper.color_bar, place="below")
 
-sv_resolrings = sv.ResolutionRings([sv_main, sv_zoom1, sv_zoom2], sv_metadata, sv_streamctrl)
-sv_intensity_roi = sv.IntensityROI([sv_main, sv_zoom1, sv_zoom2], sv_metadata, sv_streamctrl)
-sv_saturated_pixels = sv.SaturatedPixels([sv_main, sv_zoom1, sv_zoom2], sv_metadata, sv_streamctrl)
-sv_spots = sv.Spots([sv_main], sv_metadata, sv_streamctrl)
-sv_disabled_modules = sv.DisabledModules([sv_main], sv_streamctrl)
+sv_resolrings = sv.ResolutionRings([sv_main, sv_zoom1, sv_zoom2], RESOLUTION_RINGS_POS)
 
-sv_hist = sv.Histogram(nplots=2, height=280, width=sv_zoom1.plot.width)
+sv_intensity_roi = sv.IntensityROI([sv_main, sv_zoom1, sv_zoom2])
 
-sv_imageproc = sv.ImageProcessor()
+sv_saturated_pixels = sv.SaturatedPixels([sv_main, sv_zoom1, sv_zoom2])
+
+sv_spots = sv.Spots([sv_main])
+
+sv_hist = sv.Histogram(nplots=2, plot_height=280, plot_width=sv_zoom1.plot.plot_width)
+
+sv_image_processor = sv.ImageProcessor()
 
 zoom1_spectrum_x_source = ColumnDataSource(dict(x=[], y=[]))
 zoom1_spectrum_y_source = ColumnDataSource(dict(x=[], y=[]))
@@ -158,10 +159,15 @@ def save_spectrum_select_callback(_attr, _old, new):
 save_spectrum_select = Select(title="Saved Spectra:", options=["None"], value="None")
 save_spectrum_select.on_change("value", save_spectrum_select_callback)
 
-sv_streamgraph = sv.StreamGraph(nplots=3, height=200, width=1100)
+sv_streamgraph = sv.StreamGraph(nplots=3, plot_height=200, plot_width=1100)
 sv_streamgraph.plots[0].title = Title(text="Total Intensity")
 sv_streamgraph.plots[1].title = Title(text="Zoom Area 1 Total Intensity")
 sv_streamgraph.plots[2].title = Title(text="Zoom Area 2 Total Intensity")
+
+sv_streamctrl = sv.StreamControl()
+
+sv_metadata = sv.MetadataHandler(datatable_height=430, datatable_width=800)
+sv_metadata.issues_datatable.height = 100
 
 
 # Final layouts
@@ -181,21 +187,22 @@ layout_zoom2 = column(
 
 layout_bottom_row_controls = row(
     column(
-        row(sv_imageproc.threshold_min_spinner, sv_imageproc.threshold_max_spinner),
-        sv_imageproc.threshold_switch,
+        row(sv_image_processor.threshold_min_spinner, sv_image_processor.threshold_max_spinner),
+        sv_image_processor.threshold_toggle,
     ),
     Spacer(width=100),
     column(
-        row(sv_imageproc.aggregate_limit_spinner, sv_imageproc.aggregate_counter_textinput),
-        row(sv_imageproc.aggregate_switch, sv_imageproc.average_switch),
+        row(
+            sv_image_processor.aggregate_time_spinner,
+            sv_image_processor.aggregate_time_counter_textinput,
+        ),
+        sv_image_processor.aggregate_toggle,
     ),
     Spacer(width=100),
     column(save_spectrum_select, save_spectrum_button),
     Spacer(width=100),
-    column(sv_hist.auto_switch, sv_hist.log10counts_switch),
-    sv_hist.lower_spinner,
-    sv_hist.upper_spinner,
-    sv_hist.nbins_spinner,
+    column(row(sv_hist.lower_spinner, sv_hist.upper_spinner), sv_hist.auto_toggle),
+    column(sv_hist.nbins_spinner),
 )
 
 layout_streamgraphs = column(
@@ -211,23 +218,24 @@ layout_streamgraphs = column(
 show_overlays_div = Div(text="Show Overlays:")
 
 layout_controls = column(
+    doc.stats.auxiliary_apps_dropdown,
+    Spacer(height=30),
     row(sv_colormapper.select, sv_colormapper.high_color, sv_colormapper.mask_color),
+    sv_colormapper.scale_radiobuttongroup,
     row(sv_colormapper.display_min_spinner, sv_colormapper.display_max_spinner),
-    row(sv_colormapper.auto_switch, sv_colormapper.scale_radiogroup),
-    Spacer(height=10),
+    sv_colormapper.auto_toggle,
+    Spacer(height=30),
     show_overlays_div,
-    row(sv_resolrings.switch, sv_main.proj_switch),
-    row(sv_intensity_roi.switch, sv_saturated_pixels.switch),
-    Spacer(height=10),
-    row(sv_streamctrl.datatype_select, sv_streamctrl.rotate_image),
-    sv_streamctrl.prev_image_slider,
-    row(sv_streamctrl.conv_opts, sv_streamctrl.double_pixels),
-    row(Spacer(width=155), sv_streamctrl.show_only_events_switch),
-    row(doc.stats.auxiliary_apps_dropdown, sv_streamctrl.toggle),
+    row(sv_resolrings.toggle),
+    row(sv_intensity_roi.toggle, sv_saturated_pixels.toggle),
+    Spacer(height=30),
+    sv_streamctrl.datatype_select,
+    sv_streamctrl.conv_opts_cbbg,
+    sv_streamctrl.toggle,
 )
 
 layout_metadata = column(
-    sv_metadata.issues_datatable, row(sv_metadata.show_all_switch), sv_metadata.datatable
+    sv_metadata.issues_datatable, sv_metadata.datatable, row(sv_metadata.show_all_toggle)
 )
 
 layout_left = column(row(layout_zoom1, layout_zoom2), layout_bottom_row_controls)
@@ -243,8 +251,8 @@ doc.add_root(row(Spacer(width=20), final_layout))
 async def internal_periodic_callback():
     if sv_streamctrl.is_activated and sv_streamctrl.is_receiving:
         sv_rt.metadata, sv_rt.image = sv_streamctrl.get_stream_data(-1)
-        sv_rt.thresholded_image, sv_rt.aggregated_image, sv_rt.reset = sv_imageproc.update(
-            sv_rt.metadata, sv_rt.image
+        sv_rt.thresholded_image, sv_rt.aggregated_image, sv_rt.reset = sv_image_processor.update(
+            sv_rt.image
         )
 
     if sv_rt.image.shape == (1, 1):
@@ -257,12 +265,6 @@ async def internal_periodic_callback():
     sv_colormapper.update(aggr_image)
     sv_main.update(aggr_image)
 
-    sv_spots.update(metadata)
-    sv_resolrings.update(metadata)
-    sv_intensity_roi.update(metadata)
-    sv_saturated_pixels.update(metadata)
-    sv_disabled_modules.update(metadata)
-
     sv_zoom1_proj_v.update(sv_zoom1.displayed_image)
     sv_zoom1_proj_h.update(sv_zoom1.displayed_image)
 
@@ -270,8 +272,8 @@ async def internal_periodic_callback():
     sv_zoom2_proj_h.update(sv_zoom2.displayed_image)
 
     # Deactivate auto histogram range if aggregation is on
-    if sv_imageproc.aggregate_switch.active:
-        sv_hist.auto_switch.active = []
+    if sv_image_processor.aggregate_toggle.active:
+        sv_hist.auto_toggle.active = False
 
     im_block1 = aggr_image[sv_zoom1.y_start : sv_zoom1.y_end, sv_zoom1.x_start : sv_zoom1.x_end]
     total_sum_zoom1 = bn.nansum(im_block1)
@@ -295,7 +297,15 @@ async def internal_periodic_callback():
             ]
             sv_hist.update([im_block1, im_block2], accumulate=True)
 
-    sv_metadata.update(metadata)
+    # Parse metadata
+    metadata_toshow = sv_metadata.parse(metadata)
+
+    sv_spots.update(metadata, sv_metadata)
+    sv_resolrings.update(metadata, sv_metadata)
+    sv_intensity_roi.update(metadata, sv_metadata)
+    sv_saturated_pixels.update(metadata)
+
+    sv_metadata.update(metadata_toshow)
 
 
 doc.add_periodic_callback(internal_periodic_callback, 1000 / doc.client_fps)

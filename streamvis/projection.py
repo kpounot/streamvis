@@ -1,20 +1,19 @@
 import bottleneck as bn
 import numpy as np
-from bokeh.models import ColumnDataSource, DataRange1d
-from bokeh.plotting import figure
+from bokeh.models import BasicTicker, ColumnDataSource, DataRange1d, Grid, Line, LinearAxis, Plot
 
 DEFAULT_PLOT_SIZE = 200
 
 
 class Projection:
-    def __init__(self, image_view, direction, height=None, width=None):
+    def __init__(self, image_view, direction, plot_height=None, plot_width=None):
         """Initialize a projection plot.
 
         Args:
             image_view (ImageView): Associated streamvis image view instance.
             direction (str): Display plot projection along the direction - 'horizontal', 'vertical'.
-            height (int, optional): Height of plot area in screen pixels. Defaults to None.
-            width (int, optional): Width of plot area in screen pixels. Defaults to None.
+            plot_height (int, optional): Height of plot area in screen pixels. Defaults to None.
+            plot_width (int, optional): Width of plot area in screen pixels. Defaults to None.
 
         Raises:
             ValueError: Projection direction can be either 'horizontal' or 'vertical'.
@@ -26,56 +25,63 @@ class Projection:
         self._direction = direction
 
         if direction == "vertical":
-            if height is None:
-                height = DEFAULT_PLOT_SIZE
+            if plot_height is None:
+                plot_height = DEFAULT_PLOT_SIZE
 
-            if width is None:
-                width = image_view.plot.width
+            if plot_width is None:
+                plot_width = image_view.plot.plot_width
 
-            plot = figure(
-                y_axis_location="right",
+            plot = Plot(
                 x_range=image_view.plot.x_range,
                 y_range=DataRange1d(),
-                height=height,
-                width=width,
+                plot_height=plot_height,
+                plot_width=plot_width,
                 toolbar_location=None,
             )
 
-            plot.xaxis.major_label_text_font_size = "0pt"
-            plot.yaxis.major_label_orientation = "vertical"
+            # ---- axes
+            plot.add_layout(LinearAxis(major_label_orientation="vertical"), place="right")
+            plot.add_layout(LinearAxis(major_label_text_font_size="0pt"), place="below")
 
         elif direction == "horizontal":
-            if height is None:
-                height = image_view.plot.height
+            if plot_height is None:
+                plot_height = image_view.plot.plot_height
 
-            if width is None:
-                width = DEFAULT_PLOT_SIZE
+            if plot_width is None:
+                plot_width = DEFAULT_PLOT_SIZE
 
-            plot = figure(
-                x_axis_location="above",
+            plot = Plot(
                 x_range=DataRange1d(),
                 y_range=image_view.plot.y_range,
-                height=height,
-                width=width,
+                plot_height=plot_height,
+                plot_width=plot_width,
                 toolbar_location=None,
             )
 
-            plot.yaxis.major_label_text_font_size = "0pt"
+            # ---- axes
+            plot.add_layout(LinearAxis(), place="above")
+            plot.add_layout(LinearAxis(major_label_text_font_size="0pt"), place="left")
+
+        # ---- grid lines
+        plot.add_layout(Grid(dimension=0, ticker=BasicTicker()))
+        plot.add_layout(Grid(dimension=1, ticker=BasicTicker()))
 
         # ---- line glyph
         self._line_source = ColumnDataSource(dict(x=[], y=[]))
-        plot.line(source=self._line_source, x="x", y="y", line_color="steelblue")
+        plot.add_glyph(self._line_source, Line(x="x", y="y", line_color="steelblue"))
 
         self.plot = plot
 
     @property
     def x(self):
-        """Current x-axis values (readonly)."""
+        """Current x-axis values (readonly).
+        """
         return self._line_source.data["x"]
 
     @property
     def y(self):
-        """Current y-axis values (readonly)."""
+        """Current y-axis values (readonly).
+        """
         return self._line_source.data["y"]
 
     def update(self, image):

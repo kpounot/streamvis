@@ -1,57 +1,89 @@
 import numpy as np
-from bokeh.models import CheckboxGroup, Spinner, TextInput
+from bokeh.models import Spinner, TextInput, Toggle
 
 
 class ImageProcessor:
     def __init__(self):
-        """Initialize an image processor."""
+        """Initialize an image processor.
+        """
         self.aggregated_image = np.zeros((1, 1), dtype=np.float32)
 
-        # Threshold widgets
-        self.threshold_switch = CheckboxGroup(labels=["Apply Thresholding"], width=145)
+        # Intensity threshold toggle
+        def threshold_toggle_callback(state):
+            self.threshold_toggle.button_type = "primary" if state else "default"
 
-        self.threshold_min_spinner = Spinner(title="Min Intensity:", value=0, step=0.1, width=145)
+        threshold_toggle = Toggle(label="Apply Thresholding", active=False, button_type="default")
+        threshold_toggle.on_click(threshold_toggle_callback)
+        self.threshold_toggle = threshold_toggle
 
+        # Threshold min/max value spinners
+        self.threshold_min_spinner = Spinner(
+            title="Min Intensity:", value=0, step=0.1, default_size=145
+        )
         self.threshold_max_spinner = Spinner(
-            title="Max Intensity:", value=1000, step=0.1, width=145
+            title="Max Intensity:", value=1000, step=0.1, default_size=145
         )
 
-        # Aggregate widgets
-        self.aggregate_switch = CheckboxGroup(labels=["Apply Aggregation"], width=145)
+        # Aggregation time toggle
+        def aggregate_toggle_callback(state):
+            self.aggregate_toggle.button_type = "primary" if state else "default"
 
-        self.aggregate_limit_spinner = Spinner(title="Limit:", value=0, low=0, step=1, width=145)
+        aggregate_toggle = Toggle(label="Apply Aggregation", active=False, button_type="default")
+        aggregate_toggle.on_click(aggregate_toggle_callback)
+        self.aggregate_toggle = aggregate_toggle
 
-        self.aggregate_counter_textinput = TextInput(
-            title="Counter:", value=str(1), disabled=True, width=145
+        # Aggregate time spinner
+        self.aggregate_time_spinner = Spinner(
+            title="Aggregate Time:", value=0, low=0, step=1, default_size=145
         )
 
-        self.average_switch = CheckboxGroup(labels=["Show Average"], width=145)
+        # Aggregate time counter textinput
+        aggregate_time_counter_textinput = TextInput(
+            title="Time Counter:", value=str(1), disabled=True, default_size=145
+        )
+        self.aggregate_time_counter_textinput = aggregate_time_counter_textinput
+
+    @property
+    def threshold_flag(self):
+        """Threshold toggle state (readonly).
+        """
+        return self.threshold_toggle.active
 
     @property
     def threshold_min(self):
-        """Minimal image threshold value (readonly)."""
+        """Minimal image threshold value (readonly).
+        """
         return self.threshold_min_spinner.value
 
     @property
     def threshold_max(self):
-        """Maximal image threshold value (readonly)."""
+        """Maximal image threshold value (readonly).
+        """
         return self.threshold_max_spinner.value
 
     @property
-    def aggregate_limit(self):
-        """A number of image aggregation before resetting (readonly)."""
-        return self.aggregate_limit_spinner.value
+    def aggregate_flag(self):
+        """Aggregate toggle state (readonly).
+        """
+        return self.aggregate_toggle.active
+
+    @property
+    def aggregate_time(self):
+        """A number of image aggregation before resetting (readonly).
+        """
+        return self.aggregate_time_spinner.value
 
     @property
     def aggregate_counter(self):
-        """A current number of aggregated images (readonly)."""
-        return int(self.aggregate_counter_textinput.value)
+        """A current number of aggregated images (readonly).
+        """
+        return int(self.aggregate_time_counter_textinput.value)
 
     @aggregate_counter.setter
     def aggregate_counter(self, value):
-        self.aggregate_counter_textinput.value = str(value)
+        self.aggregate_time_counter_textinput.value = str(value)
 
-    def update(self, metadata, image):
+    def update(self, image):
         """Trigger an update for the image processor.
 
         Args:
@@ -60,33 +92,22 @@ class ImageProcessor:
         Returns:
             (ndarray, ndarray, bool): Resulting thresholding image, aggregated image and reset flag.
         """
-        if image.shape == (1, 1):
-            # skip update if the image is dummy
-            return np.zeros((1, 1), dtype="float32"), np.zeros((1, 1), dtype="float32"), False
-
-        counts = metadata.get("aggregated_images", 1)
-
         thr_image = image.copy()
-        if self.threshold_switch.active:
+        if self.threshold_flag:
             ind = (thr_image < self.threshold_min) | (self.threshold_max < thr_image)
             thr_image[ind] = 0
 
         if (
-            self.aggregate_switch.active
-            and (self.aggregate_limit == 0 or self.aggregate_limit > self.aggregate_counter)
+            self.aggregate_flag
+            and (self.aggregate_time == 0 or self.aggregate_time > self.aggregate_counter)
             and self.aggregated_image.shape == image.shape
         ):
             self.aggregated_image += thr_image
-            self.aggregate_counter += counts
+            self.aggregate_counter += 1
             reset = False
         else:
             self.aggregated_image = thr_image
-            self.aggregate_counter = counts
+            self.aggregate_counter = 1
             reset = True
 
-        if self.average_switch.active:
-            aggregated_image = self.aggregated_image / self.aggregate_counter
-        else:
-            aggregated_image = self.aggregated_image
-
-        return thr_image, aggregated_image, reset
+        return thr_image, self.aggregated_image, reset

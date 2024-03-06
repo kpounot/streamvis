@@ -1,4 +1,5 @@
 import h5py
+import numpy as np
 from bokeh.io import curdoc
 from bokeh.layouts import column, row
 from bokeh.models import Button, Slider, TextInput
@@ -15,15 +16,13 @@ MAIN_CANVAS_HEIGHT = 1000 + 59
 
 
 # Create streamvis components
-sv_metadata = sv.MetadataHandler(datatable_height=300, datatable_width=400)
-
-sv_main = sv.ImageView(height=MAIN_CANVAS_HEIGHT, width=MAIN_CANVAS_WIDTH)
+sv_main = sv.ImageView(plot_height=MAIN_CANVAS_HEIGHT, plot_width=MAIN_CANVAS_WIDTH)
 
 sv_colormapper = sv.ColorMapper([sv_main])
 sv_colormapper.color_bar.width = MAIN_CANVAS_WIDTH // 2
 sv_main.plot.add_layout(sv_colormapper.color_bar, place="below")
 
-sv_hist = sv.Histogram(nplots=1, height=400, width=700)
+sv_hist = sv.Histogram(nplots=1, plot_height=400, plot_width=700)
 
 file_path = TextInput(title="File Path:", value="/")
 
@@ -57,8 +56,12 @@ def image_index_slider_callback(_attr, _old, new):
     doc.add_next_tick_callback(update_client)
 
 
-image_index_slider = Slider(start=0, end=99, value=0, step=1, title="Pulse Number", disabled=True)
+image_index_slider = Slider(
+    start=0, end=99, value_throttled=0, step=1, title="Pulse Number", disabled=True,
+)
 image_index_slider.on_change("value_throttled", image_index_slider_callback)
+
+sv_metadata = sv.MetadataHandler(datatable_height=300, datatable_width=400)
 
 
 # Final layouts
@@ -68,8 +71,9 @@ layout_controls = column(
     load_file_button,
     image_index_slider,
     row(sv_colormapper.select, sv_colormapper.high_color),
+    sv_colormapper.scale_radiobuttongroup,
     row(sv_colormapper.display_min_spinner, sv_colormapper.display_max_spinner),
-    row(sv_colormapper.auto_switch, sv_colormapper.scale_radiogroup),
+    sv_colormapper.auto_toggle,
 )
 
 final_layout = row(layout_controls, sv_main.plot, column(sv_hist.plots[0], sv_metadata.datatable))

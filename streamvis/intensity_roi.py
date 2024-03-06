@@ -1,25 +1,25 @@
-import numpy as np
-from bokeh.models import CheckboxGroup, ColumnDataSource, Quad, Text
+from bokeh.models import ColumnDataSource, Quad, Text, Toggle
 
 
 class IntensityROI:
-    def __init__(self, image_views, sv_metadata, sv_streamctrl):
+    def __init__(self, image_views):
         """Initialize a intensity ROI overlay.
 
         Args:
             image_views (ImageView): Associated streamvis image view instances.
-            sv_metadata (MetadataHandler): A metadata handler to report metadata issues.
-            sv_streamctrl (StreamControl): A StreamControl instance of an application.
         """
-        self._sv_metadata = sv_metadata
-        self._sv_streamctrl = sv_streamctrl
-
         # ---- intensity ROIs
         self._source = ColumnDataSource(
             dict(left=[], right=[], bottom=[], top=[], text_x=[], text_y=[], text=[])
         )
         quad_glyph = Quad(
-            left="left", right="right", bottom="bottom", top="top", fill_alpha=0, line_color="white"
+            left="left",
+            right="right",
+            bottom="bottom",
+            top="top",
+            fill_alpha=0,
+            line_color="white",
+            line_alpha=0,
         )
 
         text_glyph = Text(
@@ -29,73 +29,57 @@ class IntensityROI:
             text_align="right",
             text_baseline="top",
             text_color="white",
+            text_alpha=0,
         )
 
         for image_view in image_views:
             image_view.plot.add_glyph(self._source, quad_glyph)
             image_view.plot.add_glyph(self._source, text_glyph)
 
-        # ---- switch
-        switch = CheckboxGroup(labels=["Intensity ROIs"], width=145, margin=(0, 5, 0, 5))
-        self.switch = switch
+        # ---- toggle button
+        def toggle_callback(state):
+            if state:
+                quad_glyph.line_alpha = 1
+                text_glyph.text_alpha = 1
+            else:
+                quad_glyph.line_alpha = 0
+                text_glyph.text_alpha = 0
 
-    def _clear(self):
-        if len(self._source.data["left"]):
-            self._source.data.update(
-                left=[], right=[], bottom=[], top=[], text_x=[], text_y=[], text=[]
-            )
+        toggle = Toggle(label="Intensity ROIs", button_type="default", default_size=145)
+        toggle.on_click(toggle_callback)
+        self.toggle = toggle
 
-    def update(self, metadata):
+    def update(self, metadata, sv_metadata):
         """Trigger an update for the intensity ROI overlay.
 
         Args:
             metadata (dict): A dictionary with current metadata.
+            sv_metadata (MetadataHandler): Report update issues to that metadata handler.
         """
-        if not self.switch.active:
-            self._clear()
-            return
-
         roi_x1 = metadata.get("roi_x1")
         roi_x2 = metadata.get("roi_x2")
         roi_y1 = metadata.get("roi_y1")
         roi_y2 = metadata.get("roi_y2")
 
-        if roi_x1 is None or roi_x2 is None or roi_y1 is None or roi_y2 is None:
-            self._sv_metadata.add_issue("Metadata does not contain data for intensity ROIs")
-            self._clear()
-            return
+        if roi_x1 and roi_x2 and roi_y1 and roi_y2:
+            if not len(roi_x1) == len(roi_x2) == len(roi_y1) == len(roi_y2):
+                sv_metadata.add_issue("Metadata for intensity ROIs is inconsistent")
 
-        if not (len(roi_x1) == len(roi_x2) == len(roi_y1) == len(roi_y2)):
-            self._sv_metadata.add_issue("Metadata for intensity ROIs is inconsistent")
-            self._clear()
-            return
+            else:
+                self._source.data.update(
+                    left=roi_x1,
+                    right=roi_x2,
+                    bottom=roi_y1,
+                    top=roi_y2,
+                    text_x=roi_x2,
+                    text_y=roi_y2,
+                    text=[str(i) for i in range(len(roi_x1))],
+                )
 
-        n_rot90 = self._sv_streamctrl.n_rot90
-        im_shape = self._sv_streamctrl.current_image_shape  # image shape after rotation in sv
-        if n_rot90 == 1 or n_rot90 == 3:
-            # get the original shape for consistency in calculations
-            im_shape = im_shape[1], im_shape[0]
+        else:
+            self._source.data.update(
+                left=[], right=[], bottom=[], top=[], text_x=[], text_y=[], text=[]
+            )
 
-        roi_x1 = np.array(roi_x1)
-        roi_x2 = np.array(roi_x2)
-        roi_y1 = np.array(roi_y1)
-        roi_y2 = np.array(roi_y2)
-        if n_rot90 == 1:  # (x, y) -> (y, -x)
-            roi_x1, roi_y1 = roi_y1, im_shape[1] - roi_x1
-            roi_x2, roi_y2 = roi_y2, im_shape[1] - roi_x2
-        elif n_rot90 == 2:  # (x, y) -> (-x, -y)
-            roi_x1, roi_y1 = im_shape[1] - roi_x1, im_shape[0] - roi_y1
-            roi_x2, roi_y2 = im_shape[1] - roi_x2, im_shape[0] - roi_y2
-        elif n_rot90 == 3:  # (x, y) -> (-y, x)
-            roi_x1, roi_y1 = im_shape[0] - roi_y1, roi_x1
-            roi_x2, roi_y2 = im_shape[0] - roi_y2, roi_x2
-
-        self._source.data.update(
-            left=roi_x1,
-            right=roi_x2,
-            bottom=roi_y1,
-            top=roi_y2,
-            text_x=roi_x2,
-            text_y=roi_y2,
-            text=[str(i) for i in range(len(roi_x1))],
-        )
+            if self.toggle.active:
+                sv_metadata.add_issue("Metadata does not contain data for intensity ROIs")
