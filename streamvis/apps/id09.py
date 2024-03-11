@@ -5,7 +5,6 @@ from bokeh.layouts import column, gridplot, row
 from bokeh.models import Div, Spacer, Title
 
 import streamvis as sv
-from input_control import StreamControl
 
 
 doc = curdoc()
@@ -99,7 +98,7 @@ sv_hist.plots[0].title = Title(text="Full image")
 sv_hist.plots[1].title = Title(text="Signal roi", text_color="red")
 sv_hist.plots[2].title = Title(text="Background roi", text_color="green")
 
-sv_streamctrl = StreamControl()
+sv_streamctrl = sv.StreamControl()
 
 sv_metadata = sv.MetadataHandler(datatable_height=130, datatable_width=700)
 sv_metadata.issues_datatable.height = 100
@@ -146,6 +145,7 @@ layout_controls = row(
         row(sv_resolrings.toggle),
         row(sv_intensity_roi.toggle, sv_saturated_pixels.toggle),
         row(sv_streamctrl.datatype_select, sv_streamctrl.rotate_image),
+        row(sv_streamctrl.storage_cell),
         sv_streamctrl.conv_opts_cbbg,
         sv_streamctrl.toggle,
     ),
@@ -171,6 +171,11 @@ doc.add_root(final_layout)
 
 
 async def internal_periodic_callback():
+    if sv_streamctrl.storage_cell.value == 'any':
+        sv_streamctrl.receiver.sc = range(16)
+    else:
+        sv_streamctrl.receiver.sc = [int(sv_streamctrl.storage_cell.value)]
+
     if sv_streamctrl.is_activated and sv_streamctrl.is_receiving:
         sv_rt.metadata, sv_rt.image = sv_streamctrl.get_stream_data(-1)
 

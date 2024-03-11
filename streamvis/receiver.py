@@ -38,6 +38,8 @@ class Receiver:
         self.on_receive = on_receive
         self.publisher = publisher_address
 
+        self.sc = range(16)
+
         self.jf_adapter = StreamAdapter()
 
     def start(self, io_threads, connection_mode, address, burst=False, timeout=1000):
@@ -61,6 +63,11 @@ class Receiver:
         else:
             gains = DataStorage(str(base_folder / "SCRIPTS/gain_maps_m524_m525.h5")).gains
             darks = DataStorage(str(base_folder / "PROCESSED_DATA/darks/darks_last.h5")).darks
+
+        darks[:, :, 0] = darks[:, :, 1]
+        darks[:, :, 2] = darks[:, :, 1]
+        gains[:, :, 0] = gains[:, :, 1]
+        gains[:, :, 2] = gains[:, :, 1]
 
         sockets = []
         poller = zmq.Poller()
@@ -120,7 +127,7 @@ class Receiver:
                     if len(metas) == 2:
                         frameIdx = metas[-1]['frameIndex'] % 16 if burst else 0
                         metadata = metas[-1]
-                        if metas[-1]['frameIndex'] == metas[-2]['frameIndex']:
+                        if frameIdx in self.sc:
                             image = np.array(imgs[-2:])
                             try: 
                                 image = correct(image, darks=darks[frameIdx], gains=gains[frameIdx], geometry=True)

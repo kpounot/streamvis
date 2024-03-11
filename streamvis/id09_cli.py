@@ -11,7 +11,7 @@ from bokeh.server.server import Server
 
 from streamvis import __version__
 from streamvis.handler import StreamvisHandler, StreamvisLimitSessionsHandler
-from receiver import Receiver
+from streamvis.receiver import Receiver
 from streamvis.statistics_handler import StatisticsHandler
 
 logging.basicConfig(format="%(asctime)s %(message)s", level=logging.INFO)
@@ -133,8 +133,8 @@ def main():
 
     # Receiver gets messages via zmq stream, reconstruct images (only those that are being
     # requested), and parses statistics with StatisticsHandler
-    receiver = Receiver(buffer_size=args.buffer_size)
-    # receiver = Receiver(on_receive=stats.parse, buffer_size=args.buffer_size)
+    # receiver = Receiver(buffer_size=args.buffer_size)
+    receiver = Receiver(on_receive=stats.parse, buffer_size=args.buffer_size)
 
     # Start receivers in a separate threads
     start_receiver = partial(
