@@ -41,15 +41,17 @@ class StreamControl:
         self.rotate_image = rotate_image
 
 
-        # rotate image select
-        sc = list(np.arange(16).astype(str)) + ['any']
-        storage_cell = Select(
-            title="Storage cell:",
-            value=sc[0],
-            options=sc,
-            default_size=145,
-        )
-        self.storage_cell = storage_cell
+        if self.receiver.burst:
+            sc = list(np.arange(16).astype(str)) + ['any']
+            storage_cell = Select(
+                title="Storage cell:",
+                value=sc[16],
+                options=sc,
+                default_size=145,
+            )
+            self.storage_cell = storage_cell
+        else:
+            self.storage_cell = None
 
         doc.add_periodic_callback(self._update_toggle_view, 1000)
 

@@ -23,7 +23,13 @@ logger = logging.getLogger(__name__)
 
 
 class Receiver:
-    def __init__(self, on_receive=None, buffer_size=1, publisher_address=None):
+    def __init__(
+            self, 
+            on_receive=None, 
+            buffer_size=1, 
+            publisher_address=None,
+            burst=False,
+        ):
         """Initialize a jungfrau receiver.
 
         Args:
@@ -37,12 +43,16 @@ class Receiver:
         self.state = "polling"
         self.on_receive = on_receive
         self.publisher = publisher_address
+        
+        self.burst = burst
 
         self.sc = range(16)
 
         self.jf_adapter = StreamAdapter()
 
-    def start(self, io_threads, connection_mode, address, burst=False, timeout=1000):
+    def start(self, io_threads, connection_mode, address, burst=False,
+              timeout=1000,
+              exp_folder="/data/visitor/blc15385/id09/20240513/"):
         """Start the receiver loop.
 
         Args:
@@ -55,20 +65,23 @@ class Receiver:
         """
         zmq_context = zmq.Context(io_threads=io_threads)
 
-        base_folder = Path("/data/visitor/ls3363/id09/20240227/")
+        gain_folder = Path("/data/id09/archive/calibrations/jf1m")
+        exp_folder = Path(exp_folder)
+        if not exp_folder.exists():
+            raise Exception(f"'exp_folder' ({str(exp_folder)}) does not exist")
         if burst:
             print("Using burst")
-            gains = DataStorage(str(base_folder / "SCRIPTS/gain_maps_m524_m525_sc.h5")).gains
-            darks = DataStorage(str(base_folder / "PROCESSED_DATA/darks/darks_last_sc.h5")).darks
+            gains_file = str(gain_folder / "gain_maps_m593_m601_sc.h5")
+            darks_file = str(exp_folder / "PROCESSED_DATA" / "darks" /
+                             "darks_last_sc.h5")
         else:
-            gains = DataStorage(str(base_folder / "SCRIPTS/gain_maps_m524_m525.h5")).gains
-            darks = DataStorage(str(base_folder / "PROCESSED_DATA/darks/darks_last.h5")).darks
+            gains_file = str(gain_folder / "gain_maps_m593_m601.h5")
+            darks_file = str(exp_folder / "PROCESSED_DATA" / "darks" /
+                             "darks_last.h5")
 
-        darks[:, :, 0] = darks[:, :, 1]
-        darks[:, :, 2] = darks[:, :, 1]
-        gains[:, :, 0] = gains[:, :, 1]
-        gains[:, :, 2] = gains[:, :, 1]
-
+        gains = DataStorage(gains_file).gains
+        darks = DataStorage(darks_file).darks
+        
         sockets = []
         poller = zmq.Poller()
         for adrs in address:
@@ -130,7 +143,12 @@ class Receiver:
                         if frameIdx in self.sc:
                             image = np.array(imgs[-2:])
                             try: 
-                                image = correct(image, darks=darks[frameIdx], gains=gains[frameIdx], geometry=True)
+                                image = correct(
+                                    image, 
+                                    darks=darks[frameIdx], 
+                                    gains=gains[frameIdx], 
+                                    geometry=True
+                                )
                                 image = image[:, ::-1].T
                                 self.buffer.append((metadata, image))
                             except:

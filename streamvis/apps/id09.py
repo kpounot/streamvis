@@ -145,7 +145,8 @@ layout_controls = row(
         row(sv_resolrings.toggle),
         row(sv_intensity_roi.toggle, sv_saturated_pixels.toggle),
         row(sv_streamctrl.datatype_select, sv_streamctrl.rotate_image),
-        row(sv_streamctrl.storage_cell),
+        row(sv_streamctrl.storage_cell) if sv_streamctrl.storage_cell 
+        is not None else Spacer(height=10),
         sv_streamctrl.conv_opts_cbbg,
         sv_streamctrl.toggle,
     ),
@@ -171,10 +172,11 @@ doc.add_root(final_layout)
 
 
 async def internal_periodic_callback():
-    if sv_streamctrl.storage_cell.value == 'any':
-        sv_streamctrl.receiver.sc = range(16)
-    else:
-        sv_streamctrl.receiver.sc = [int(sv_streamctrl.storage_cell.value)]
+    if sv_streamctrl.storage_cell is not None:
+        if sv_streamctrl.storage_cell.value == 'any':
+            sv_streamctrl.receiver.sc = range(16)
+        else:
+            sv_streamctrl.receiver.sc = [int(sv_streamctrl.storage_cell.value)]
 
     if sv_streamctrl.is_activated and sv_streamctrl.is_receiving:
         sv_rt.metadata, sv_rt.image = sv_streamctrl.get_stream_data(-1)

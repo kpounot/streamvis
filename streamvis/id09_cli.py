@@ -63,7 +63,8 @@ def main():
         metavar="PROTOCOL://HOST:PORT",
         type=str,
         action='append',
-        default=["tcp://172.29.10.100:30001", "tcp://172.29.10.100:30002"],
+        # default=["tcp://172.29.10.100:30001", "tcp://172.29.10.100:30002"],
+        default=["tcp://160.103.208.85:30001", "tcp://160.103.208.85:30002"],
         help="an address string for zmq socket",
     )
 
@@ -124,6 +125,8 @@ def main():
 
     args = parser.parse_args()
 
+    print(f"Using HTTP port: 5006")
+
     app_path = os.path.join(apps_path, args.app + ".py")
     logger.info(app_path)
 
@@ -134,7 +137,9 @@ def main():
     # Receiver gets messages via zmq stream, reconstruct images (only those that are being
     # requested), and parses statistics with StatisticsHandler
     # receiver = Receiver(buffer_size=args.buffer_size)
-    receiver = Receiver(on_receive=stats.parse, buffer_size=args.buffer_size)
+    receiver = Receiver(
+        on_receive=stats.parse, buffer_size=args.buffer_size, burst=args.burst
+    )
 
     # Start receivers in a separate threads
     start_receiver = partial(
