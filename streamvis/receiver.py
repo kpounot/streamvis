@@ -1,6 +1,4 @@
-import sys
-
-from time import sleep
+import os
 
 import logging
 from collections import deque
@@ -17,7 +15,7 @@ from numba import njit
 
 from datastorage import DataStorage
 
-from id09.detectors.jungfrau import correct, process_jf_darks
+from id09.detectors.jungfrau import correct
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +77,8 @@ class Receiver:
             darks_file = str(exp_folder / "PROCESSED_DATA" / "darks" /
                              "darks_last.h5")
 
+        darks_mtime = os.lstat(darks_file).st_mtime
+
         gains = DataStorage(gains_file).gains
         darks = DataStorage(darks_file).darks
         
@@ -98,6 +98,10 @@ class Receiver:
             sockets.append(zmq_socket)
 
         while True:
+            if darks_mtime != os.lstat(darks_file).st_mtime:
+                darks = DataStorage(darks_file).darks
+                darks_mtime = os.lstat(darks_file).st_mtime
+                print(f"Using a newer dark: {os.readlink(darks_file)}")
             events = dict(poller.poll(timeout))
             time_poll = datetime.now()
             is_receiving = True
@@ -138,6 +142,8 @@ class Receiver:
                         is_receiving = False
 
                     if len(metas) == 2:
+                        if metas[0]['frameIndex'] != metas[1]['frameIndex']:
+                            continue
                         frameIdx = metas[-1]['frameIndex'] % 16 if burst else 0
                         metadata = metas[-1]
                         if frameIdx in self.sc:
@@ -149,7 +155,7 @@ class Receiver:
                                     gains=gains[frameIdx], 
                                     geometry=True
                                 )
-                                image = image[:, ::-1].T
+                                # image = image
                                 self.buffer.append((metadata, image))
                             except:
                                 print("Check if dark is in the right BURST/STANDARD mode")
